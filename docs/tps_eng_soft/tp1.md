@@ -31,5 +31,4 @@ Será desenvolvido um sistema de teleodontologia que consiste em um chatbot (aut
 - **Manutenibilidade:** A arquitetura de microsserviços é adotada para facilitar a manutenção do sistema.
 
 ## (v) O diagrama de caso de uso da aplicação
-
-Ver use_cases.jpg
+![Diagrama de Caso de Uso](diagrams/Diagnose.drawio.png)
