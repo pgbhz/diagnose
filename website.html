@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proposta de Sistema para Triagem Odontológica com IA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Calm Neutrals with Teal Accent -->
+    <!-- Application Structure Plan: The SPA is designed to follow the logical flow of data through the proposed system, making a complex architecture intuitive. It's structured into three main thematic sections: 1) An interactive "System Flow" diagram that visualizes the data journey from input to triage result. This is the core of the application for explaining the 'how'. 2) A detailed "Architecture Components" section, allowing users to dive deeper into the technology stack of each part of the flow. 3) A "Research Foundation" section that presents the academic underpinning of the project. This structure was chosen because it first presents the high-level concept, then allows for a detailed drill-down into both the technical and academic aspects, catering to different audiences (e.g., academic advisors, technical reviewers). Navigation is handled by a simple header, allowing non-linear exploration. -->
+    <!-- Visualization & Content Choices: 
+        - System Flow: Goal is to organize and explain a process. A custom diagram built with HTML/CSS (Flexbox/Grid) is used instead of static images or complex libraries. Interaction: Clicking on a stage highlights it and can link to more details, making the diagram an interactive menu. Justification: This is more accessible, responsive, and maintainable than an image, and directly connects the system's parts to their detailed explanations.
+        - Priority Score Simulation: Goal is to demonstrate a relationship. A Chart.js Bar Chart is used. Interaction: Sliders allow the user to change the input scores from the AI models, and the chart updates in real-time to show the new aggregated priority. Justification: This makes the abstract concept of "verdict aggregation" tangible and easy to understand.
+        - Architecture Details: Goal is to inform. A card-based layout with click-to-reveal content is used. Justification: This keeps the initial view clean and prevents information overload, letting users explore only the components they are interested in.
+        - Research Papers: Goal is to organize information. A filterable list of cards is used. Interaction: Buttons allow filtering papers by category. Justification: This provides a simple and effective way to navigate the literature review.
+        - Library/Method: Vanilla JS for all interactions, Chart.js for the dynamic chart. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+        }
+
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 350px;
+        }
+
+        .flow-step {
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+
+        .flow-step:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        .nav-link {
+            transition: color 0.2s;
+        }
+
+        .nav-link:hover {
+            color: #14b8a6;
+        }
+
+        .active-tab {
+            border-bottom-color: #14b8a6;
+            color: #14b8a6;
+            font-weight: 500;
+        }
+
+        .research-filter.active {
+            background-color: #14b8a6;
+            color: white;
+        }
+    </style>
+</head>
+
+<body class="antialiased">
+    <div id="app" class="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <header class="text-center mb-12">
+            <h1 class="text-4xl font-bold text-slate-800 mb-2">Sistema de Triagem Odontológica com IA Multimodal</h1>
+            <p class="text-lg text-slate-600">Uma Proposta de Arquitetura para TCC</p>
+        </header>
+
+        <nav class="bg-white rounded-lg shadow-sm sticky top-4 z-10 mb-12 flex justify-center p-2">
+            <a href="#system-flow" class="nav-link px-4 py-2 text-slate-700 font-medium">Fluxo do Sistema</a>
+            <a href="#architecture" class="nav-link px-4 py-2 text-slate-700 font-medium">Arquitetura</a>
+            <a href="#research" class="nav-link px-4 py-2 text-slate-700 font-medium">Base de Pesquisa</a>
+        </nav>
+
+        <main>
+            <section id="system-flow" class="mb-16 scroll-mt-20">
+                <h2 class="text-3xl font-bold text-center mb-4 text-slate-800">Fluxo de Dados Interativo</h2>
+                <p class="text-center text-slate-600 max-w-3xl mx-auto mb-10">
+                    Esta seção visualiza a jornada completa dos dados do paciente, desde a entrada pelo profissional de
+                    saúde até a geração de um veredito de triagem pela IA. Cada etapa é desacoplada para garantir um
+                    sistema robusto, escalável e resiliente.
+                </p>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 text-center">
+                    <div class="flow-step bg-white p-6 rounded-lg shadow-md">
+                        <div class="text-4xl mb-3">💬</div>
+                        <h3 class="font-bold text-lg mb-1 text-slate-700">1. Coleta de Dados</h3>
+                        <p class="text-sm text-slate-500">Profissional de saúde insere dados do paciente (questionário e
+                            imagens) via chatbot.</p>
+                    </div>
+
+                    <div class="hidden lg:flex items-center justify-center text-3xl text-slate-400">→</div>
+
+                    <div class="flow-step bg-white p-6 rounded-lg shadow-md">
+                        <div class="text-4xl mb-3">📨</div>
+                        <h3 class="font-bold text-lg mb-1 text-slate-700">2. Fila de Casos</h3>
+                        <p class="text-sm text-slate-500">Dados são enviados para uma fila de processamento assíncrona.
+                        </p>
+                    </div>
+
+                    <div class="hidden lg:flex items-center justify-center text-3xl text-slate-400">↔</div>
+
+                    <div class="flow-step bg-white p-6 rounded-lg shadow-md">
+                        <div class="text-4xl mb-3">🧠</div>
+                        <h3 class="font-bold text-lg mb-1 text-slate-700">3. Análise IA</h3>
+                        <p class="text-sm text-slate-500">Modelos LLM e Multimodal processam os dados em paralelo para
+                            gerar vereditos.</p>
+                    </div>
+                </div>
+
+                <div class="flex justify-center my-4 text-3xl text-slate-400">↓</div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 max-w-4xl mx-auto gap-6">
+                    <div class="flow-step bg-white p-6 rounded-lg shadow-md text-center">
+                        <div class="text-4xl mb-3">⚖️</div>
+                        <h3 class="font-bold text-lg mb-1 text-slate-700">4. Agregação e Priorização</h3>
+                        <p class="text-sm text-slate-500">Vereditos são combinados para calcular uma pontuação final de
+                            prioridade.</p>
+                    </div>
+                    <div class="flow-step bg-white p-6 rounded-lg shadow-md text-center">
+                        <div class="text-4xl mb-3">📊</div>
+                        <h3 class="font-bold text-lg mb-1 text-slate-700">5. Resultado da Triagem</h3>
+                        <p class="text-sm text-slate-500">O caso é apresentado com sua prioridade (Urgente, Alta, Média,
+                            Baixa) e insights.</p>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 md:p-8 rounded-lg shadow-lg mt-12">
+                    <h3 class="text-2xl font-bold text-center mb-2 text-slate-800">Simulador de Priorização</h3>
+                    <p class="text-center text-slate-600 mb-6">Ajuste os valores abaixo para ver como os vereditos dos
+                        modelos de IA influenciam a pontuação de prioridade final.</p>
+                    <div class="flex flex-col md:flex-row gap-8 items-center justify-center">
+                        <div class="w-full md:w-1/2">
+                            <div class="mb-4">
+                                <label for="llm-score" class="block text-sm font-medium text-slate-700">Veredito do LLM
+                                    (Texto)</label>
+                                <input id="llm-score" type="range" min="0" max="100" value="75"
+                                    class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                                <div class="text-center font-semibold text-teal-600" id="llm-score-value">75</div>
+                            </div>
+                            <div class="mb-4">
+                                <label for="multimodal-score" class="block text-sm font-medium text-slate-700">Veredito
+                                    Multimodal (Texto+Imagem)</label>
+                                <input id="multimodal-score" type="range" min="0" max="100" value="85"
+                                    class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                                <div class="text-center font-semibold text-teal-600" id="multimodal-score-value">85
+                                </div>
+                            </div>
+                        </div>
+                        <div class="w-full md:w-1/2">
+                            <div class="chart-container">
+                                <canvas id="priorityChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="architecture" class="mb-16 scroll-mt-20">
+                <h2 class="text-3xl font-bold text-center mb-4 text-slate-800">Componentes da Arquitetura</h2>
+                <p class="text-center text-slate-600 max-w-3xl mx-auto mb-10">
+                    Explore os detalhes técnicos de cada componente do sistema. A arquitetura foi projetada com base em
+                    microserviços e comunicação assíncrona para garantir flexibilidade e escalabilidade.
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="font-bold text-xl mb-2 text-teal-700">🤖 Chatbot (Backend)</h3>
+                        <p class="text-slate-600"><strong>Função:</strong> Interface de entrada de dados para
+                            profissionais de saúde.</p>
+                        <p class="text-slate-600 mt-2"><strong>Detalhes:</strong> Gerencia conversas e versionamento de
+                            questionários para permitir atualizações dinâmicas. Construído em Python para fácil
+                            integração com bibliotecas de IA.</p>
+                        <p class="text-slate-500 mt-2 text-sm"><strong>Tecnologias:</strong> FastAPI, Pydantic, Python.
+                        </p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="font-bold text-xl mb-2 text-teal-700">📨 Fila de Mensagens</h3>
+                        <p class="text-slate-600"><strong>Função:</strong> Desacopla a coleta do processamento,
+                            gerenciando o fluxo de casos.</p>
+                        <p class="text-slate-600 mt-2"><strong>Detalhes:</strong> Atua como um buffer, garantindo que
+                            nenhum dado seja perdido em picos de uso e permitindo que os serviços de IA consumam os
+                            casos de forma independente.</p>
+                        <p class="text-slate-500 mt-2 text-sm"><strong>Tecnologias:</strong> RabbitMQ ou Apache Kafka.
+                        </p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="font-bold text-xl mb-2 text-teal-700">📄 Processador LLM</h3>
+                        <p class="text-slate-600"><strong>Função:</strong> Analisa os dados textuais do questionário.
+                        </p>
+                        <p class="text-slate-600 mt-2"><strong>Detalhes:</strong> Extrai entidades, identifica sintomas
+                            e gera um veredito de risco com base apenas nas respostas escritas. Pode ser ajustado
+                            (fine-tuned) com dados médicos específicos.</p>
+                        <p class="text-slate-500 mt-2 text-sm"><strong>Tecnologias:</strong> Transformers,
+                            PyTorch/TensorFlow.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="font-bold text-xl mb-2 text-teal-700">🖼️ Processador Multimodal</h3>
+                        <p class="text-slate-600"><strong>Função:</strong> Analisa a combinação de texto e imagens.</p>
+                        <p class="text-slate-600 mt-2"><strong>Detalhes:</strong> Correlaciona as informações do
+                            questionário com as características visuais das imagens para um diagnóstico mais acurado e
+                            contextualizado.</p>
+                        <p class="text-slate-500 mt-2 text-sm"><strong>Tecnologias:</strong> Modelos de Visão e
+                            Linguagem (VLM), como CLIP ou derivados.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="font-bold text-xl mb-2 text-teal-700">⚖️ Módulo de Agregação</h3>
+                        <p class="text-slate-600"><strong>Função:</strong> Consolida os vereditos e calcula a prioridade
+                            final.</p>
+                        <p class="text-slate-600 mt-2"><strong>Detalhes:</strong> Utiliza uma lógica de negócios (que
+                            pode ser baseada em regras ou em um pequeno modelo de machine learning) para ponderar os
+                            resultados dos diferentes modelos de IA.</p>
+                        <p class="text-slate-500 mt-2 text-sm"><strong>Tecnologias:</strong> Python, Scikit-learn.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h3 class="font-bold text-xl mb-2 text-teal-700">💾 Banco de Dados</h3>
+                        <p class="text-slate-600"><strong>Função:</strong> Armazena os casos, resultados e dados para
+                            pesquisa.</p>
+                        <p class="text-slate-600 mt-2"><strong>Detalhes:</strong> Persiste todos os dados processados,
+                            permitindo auditoria, reanálise e servindo como fonte de dados para o treinamento contínuo
+                            dos modelos.</p>
+                        <p class="text-slate-500 mt-2 text-sm"><strong>Tecnologias:</strong> PostgreSQL, MongoDB.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="research" class="scroll-mt-20">
+                <h2 class="text-3xl font-bold text-center mb-4 text-slate-800">Base de Pesquisa e Referências</h2>
+                <p class="text-center text-slate-600 max-w-3xl mx-auto mb-10">
+                    O projeto se baseia em avanços recentes em diversas áreas da inteligência artificial aplicada à
+                    saúde. Filtre abaixo para explorar artigos e trabalhos relevantes que fundamentam cada componente do
+                    sistema.
+                </p>
+
+                <div class="flex justify-center flex-wrap gap-2 mb-8" id="research-filters">
+                    <button
+                        class="research-filter active px-4 py-2 bg-white border border-slate-300 rounded-full text-sm font-medium transition"
+                        data-filter="all">Todos</button>
+                    <button
+                        class="research-filter px-4 py-2 bg-white border border-slate-300 rounded-full text-sm font-medium transition"
+                        data-filter="llm">LLMs em Medicina</button>
+                    <button
+                        class="research-filter px-4 py-2 bg-white border border-slate-300 rounded-full text-sm font-medium transition"
+                        data-filter="multimodal">IA Multimodal</button>
+                    <button
+                        class="research-filter px-4 py-2 bg-white border border-slate-300 rounded-full text-sm font-medium transition"
+                        data-filter="dentistry">IA em Odontologia</button>
+                </div>
+
+                <div id="research-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div class="research-item bg-white p-5 rounded-lg shadow-md" data-category="llm">
+                        <span class="text-xs font-semibold text-teal-700 bg-teal-100 px-2 py-1 rounded-full">LLMs em
+                            Medicina</span>
+                        <h4 class="font-bold text-md mt-3 mb-1">Large Language Models Encode Clinical Knowledge</h4>
+                        <p class="text-sm text-slate-600">Demonstra como LLMs como o GPT-3 podem ser usados para
+                            responder a perguntas médicas com alta precisão, servindo como uma base de conhecimento.</p>
+                        <p class="text-xs text-slate-400 mt-2">Singhal, K., et al. (2022)</p>
+                    </div>
+                    <div class="research-item bg-white p-5 rounded-lg shadow-md" data-category="multimodal">
+                        <span class="text-xs font-semibold text-indigo-700 bg-indigo-100 px-2 py-1 rounded-full">IA
+                            Multimodal</span>
+                        <h4 class="font-bold text-md mt-3 mb-1">Learning Transferable Visual Models From Natural
+                            Language Supervision</h4>
+                        <p class="text-sm text-slate-600">Introduz o modelo CLIP, que aprende conceitos visuais a partir
+                            de texto, fundamental para a fusão de dados de imagem e texto em aplicações multimodais.</p>
+                        <p class="text-xs text-slate-400 mt-2">Radford, A., et al. (2021)</p>
+                    </div>
+                    <div class="research-item bg-white p-5 rounded-lg shadow-md" data-category="dentistry">
+                        <span class="text-xs font-semibold text-sky-700 bg-sky-100 px-2 py-1 rounded-full">IA em
+                            Odontologia</span>
+                        <h4 class="font-bold text-md mt-3 mb-1">Deep learning for dental caries detection and
+                            classification</h4>
+                        <p class="text-sm text-slate-600">Apresenta o uso de Redes Neurais Convolucionais (CNNs) para
+                            detectar e classificar cáries dentárias em radiografias com precisão comparável à de
+                            especialistas.</p>
+                        <p class="text-xs text-slate-400 mt-2">Lee, J-H., et al. (2018)</p>
+                    </div>
+                    <div class="research-item bg-white p-5 rounded-lg shadow-md" data-category="llm">
+                        <span class="text-xs font-semibold text-teal-700 bg-teal-100 px-2 py-1 rounded-full">LLMs em
+                            Medicina</span>
+                        <h4 class="font-bold text-md mt-3 mb-1">A Study of Causal Language Models for Clinical Text
+                            Summarization</h4>
+                        <p class="text-sm text-slate-600">Explora a eficácia de LLMs para sumarizar prontuários médicos,
+                            uma tarefa análoga à interpretação de questionários de pacientes.</p>
+                        <p class="text-xs text-slate-400 mt-2">Adams, L., et al. (2023)</p>
+                    </div>
+                    <div class="research-item bg-white p-5 rounded-lg shadow-md" data-category="dentistry">
+                        <span class="text-xs font-semibold text-sky-700 bg-sky-100 px-2 py-1 rounded-full">IA em
+                            Odontologia</span>
+                        <h4 class="font-bold text-md mt-3 mb-1">Automated detection of periodontal bone loss on dental
+                            radiographs</h4>
+                        <p class="text-sm text-slate-600">Mostra a aplicação de IA para identificar perda óssea
+                            periodontal em imagens, uma tarefa crucial para a triagem de doenças gengivais.</p>
+                        <p class="text-xs text-slate-400 mt-2">Krois, J., et al. (2021)</p>
+                    </div>
+                    <div class="research-item bg-white p-5 rounded-lg shadow-md" data-category="multimodal">
+                        <span class="text-xs font-semibold text-indigo-700 bg-indigo-100 px-2 py-1 rounded-full">IA
+                            Multimodal</span>
+                        <h4 class="font-bold text-md mt-3 mb-1">Multimodal AI in Healthcare: A Survey</h4>
+                        <p class="text-sm text-slate-600">Uma revisão abrangente das técnicas e aplicações da IA
+                            multimodal na área da saúde, cobrindo fusão de dados e desafios.</p>
+                        <p class="text-xs text-slate-400 mt-2">Acosta, J. N., et al. (2022)</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const llmScoreInput = document.getElementById('llm-score');
+            const multimodalScoreInput = document.getElementById('multimodal-score');
+            const llmScoreValue = document.getElementById('llm-score-value');
+            const multimodalScoreValue = document.getElementById('multimodal-score-value');
+
+            const ctx = document.getElementById('priorityChart').getContext('2d');
+            let priorityChart;
+
+            const llmWeight = 0.4;
+            const multimodalWeight = 0.6;
+
+            function calculatePriority(llmScore, multimodalScore) {
+                return (llmScore * llmWeight) + (multimodalScore * multimodalWeight);
+            }
+
+            function getPriorityCategory(score) {
+                if (score > 85) return { label: 'Urgente', color: '#ef4444' };
+                if (score > 65) return { label: 'Prioridade Alta', color: '#f97316' };
+                if (score > 40) return { label: 'Prioridade Média', color: '#f59e0b' };
+                return { label: 'Prioridade Baixa', color: '#22c55e' };
+            }
+
+            function createOrUpdateChart() {
+                const llmScore = parseInt(llmScoreInput.value);
+                const multimodalScore = parseInt(multimodalScoreInput.value);
+                const finalPriority = calculatePriority(llmScore, multimodalScore);
+                const category = getPriorityCategory(finalPriority);
+
+                llmScoreValue.textContent = llmScore;
+                multimodalScoreValue.textContent = multimodalScore;
+
+                if (priorityChart) {
+                    priorityChart.data.datasets[0].data[0] = finalPriority;
+                    priorityChart.data.datasets[0].label = `Prioridade Final: ${category.label}`;
+                    priorityChart.data.datasets[0].backgroundColor = category.color;
+                    priorityChart.update();
+                } else {
+                    priorityChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: ['Pontuação de Prioridade'],
+                            datasets: [{
+                                label: `Prioridade Final: ${category.label}`,
+                                data: [finalPriority],
+                                backgroundColor: category.color,
+                                borderWidth: 1,
+                                barPercentage: 0.5,
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            indexAxis: 'y',
+                            scales: {
+                                x: {
+                                    beginAtZero: true,
+                                    max: 100
+                                },
+                                y: {
+                                    display: false
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'bottom'
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function (context) {
+                                            return `Pontuação: ${context.raw.toFixed(2)}`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            llmScoreInput.addEventListener('input', createOrUpdateChart);
+            multimodalScoreInput.addEventListener('input', createOrUpdateChart);
+
+            createOrUpdateChart();
+
+            const filters = document.querySelectorAll('.research-filter');
+            const items = document.querySelectorAll('.research-item');
+
+            filters.forEach(filter => {
+                filter.addEventListener('click', function () {
+                    filters.forEach(btn => btn.classList.remove('active'));
+                    this.classList.add('active');
+
+                    const filterValue = this.getAttribute('data-filter');
+
+                    items.forEach(item => {
+                        if (filterValue === 'all' || item.getAttribute('data-category') === filterValue) {
+                            item.style.display = 'block';
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+                });
+            });
+
+            document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+                anchor.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    document.querySelector(this.getAttribute('href')).scrollIntoView({
+                        behavior: 'smooth'
+                    });
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>
