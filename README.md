@@ -11,4 +11,6 @@ docs/
     architectural_decision.md      # TP2, EngSoft
     diagrams/
       Diagnose.drawio.png  # Diagrama de caso de uso
+  src/                             # bot telegram, poc em golang
+  videos/
 ```
