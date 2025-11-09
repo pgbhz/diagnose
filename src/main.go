@@ -17,12 +17,14 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Update mirrors the Telegram update payload that wraps incoming messages.
 type Update struct {
 	UpdateID      int      `json:"update_id"`
 	Message       *Message `json:"message"`
 	EditedMessage *Message `json:"edited_message"`
 }
 
+// Message captures the relevant parts of a Telegram chat message.
 type Message struct {
 	MessageID int    `json:"message_id"`
 	From      *User  `json:"from"`
@@ -31,6 +33,7 @@ type Message struct {
 	Text      string `json:"text"`
 }
 
+// User represents the Telegram account that sent a message.
 type User struct {
 	ID        int    `json:"id"`
 	IsBot     bool   `json:"is_bot"`
@@ -38,6 +41,7 @@ type User struct {
 	Username  string `json:"username"`
 }
 
+// Chat contains the destination chat metadata Telegram includes per message.
 type Chat struct {
 	ID       int64  `json:"id"`
 	Type     string `json:"type"`
@@ -45,15 +49,18 @@ type Chat struct {
 	Username string `json:"username"`
 }
 
+// getUpdatesResp holds the raw Telegram response for getUpdates polling.
 type getUpdatesResp struct {
 	OK     bool     `json:"ok"`
 	Result []Update `json:"result"`
 }
 
+// ConversationFile models the conversation.json structure.
 type ConversationFile struct {
 	Messages []ConvMessage `json:"messages"`
 }
 
+// ConvMessage defines an individual conversation node from conversation.json.
 type ConvMessage struct {
 	ID   string  `json:"id"`
 	Type string  `json:"type"`
@@ -61,6 +68,7 @@ type ConvMessage struct {
 	Next *string `json:"next"`
 }
 
+// Node stores a normalized conversation node for runtime use.
 type Node struct {
 	ID   string
 	Type string
@@ -68,6 +76,7 @@ type Node struct {
 	Next *string
 }
 
+// ChatState tracks where a chat is within the scripted conversation flow.
 type ChatState struct {
 	Awaiting    string            // question ID we're waiting answer for
 	Answers     map[string]string // questionID -> answer text
@@ -87,17 +96,25 @@ var states map[int64]*ChatState
 var apiBase string
 var httpClient *http.Client
 
+// sendReply is a function pointer used to facilitate testing sendMessage.
 var sendReply = sendMessage
 
+// chatStateFor retrieves or initializes the state tracking for a chat ID.
 func chatStateFor(chatID int64) *ChatState {
 	st := states[chatID]
 	if st == nil {
 		st = &ChatState{Answers: make(map[string]string)}
 		states[chatID] = st
+		// Persist the new chat state immediately so we don't lose the
+		// conversation when the process restarts.
+		if err := saveStates("states.json"); err != nil {
+			log.Printf("warning: could not save states after init: %v", err)
+		}
 	}
 	return st
 }
 
+// main boots the Telegram polling loop and optional Gemini prompt handling.
 func main() {
 	_ = godotenv.Load()
 
@@ -119,10 +136,17 @@ func main() {
 
 	// load conversation.json if present
 	states = make(map[int64]*ChatState)
-	if err := loadConversation("conversation.json"); err != nil {
+	if err := loadConversation("configs/conversation.json"); err != nil {
 		log.Printf("warning: could not load conversation.json: %v", err)
 	} else {
 		log.Printf("conversation loaded, start node: %s", startNodeID)
+	}
+
+	// attempt to load persisted chat states (if any)
+	if err := loadStates("states.json"); err != nil {
+		log.Printf("warning: could not load states.json: %v", err)
+	} else {
+		log.Printf("loaded %d chat states", len(states))
 	}
 
 	offset := 0
@@ -199,6 +223,7 @@ func sendPromptToGemini(prompt string) {
 	}
 }
 
+// getUpdates polls the Telegram Bot API for new updates, respecting offset.
 func getUpdates(client *http.Client, base string, offset int, timeout int) ([]Update, error) {
 	url := fmt.Sprintf(base+"getUpdates?offset=%d&timeout=%d", offset, timeout)
 	resp, err := client.Get(url)
@@ -225,6 +250,7 @@ func getUpdates(client *http.Client, base string, offset int, timeout int) ([]Up
 	return r.Result, nil
 }
 
+// printMessage logs a message and advances the scripted conversation if needed.
 func printMessage(m *Message) {
 	ts := time.Unix(m.Date, 0).Format(time.RFC3339)
 	from := ""
@@ -252,6 +278,10 @@ func printMessage(m *Message) {
 		qid := st.Awaiting
 		st.Answers[qid] = m.Text
 		st.Awaiting = ""
+		// Persist the updated state (answer recorded)
+		if err := saveStates("states.json"); err != nil {
+			log.Printf("warning: could not save states after answer: %v", err)
+		}
 		// Move to next node after this question
 		if n, ok := nodes[qid]; ok && n.Next != nil {
 			advanceChatState(chID, *n.Next)
@@ -274,7 +304,7 @@ func printMessage(m *Message) {
 	}
 }
 
-// advanceChatState handles visiting a node ID for a chat
+// advanceChatState handles visiting a node ID for a chat.
 func advanceChatState(chatID int64, nodeID string) {
 	n, ok := nodes[nodeID]
 	if !ok {
@@ -328,6 +358,7 @@ func advanceChatState(chatID int64, nodeID string) {
 	}
 }
 
+// sendMessage posts a text reply to the Telegram Bot API.
 func sendMessage(chatID int64, text string) error {
 	if httpClient == nil || apiBase == "" {
 		return fmt.Errorf("telegram client not initialised")
@@ -351,7 +382,7 @@ func sendMessage(chatID int64, text string) error {
 	return nil
 }
 
-// loadConversation loads a conversation JSON file into nodes map
+// loadConversation loads a conversation JSON file into the nodes map.
 func loadConversation(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -375,6 +406,55 @@ func loadConversation(path string) error {
 		if startNodeID == "" && i == 0 {
 			startNodeID = m.ID
 		}
+	}
+	return nil
+}
+
+// saveStates writes the in-memory chat states to the given file path as JSON.
+// Keys (chat IDs) are stored as strings to produce valid JSON object keys.
+func saveStates(path string) error {
+	if states == nil {
+		// nothing to persist
+		return nil
+	}
+	out := make(map[string]*ChatState, len(states))
+	for id, st := range states {
+		out[strconv.FormatInt(id, 10)] = st
+	}
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// loadStates attempts to read persisted chat states from the given file and
+// populate the global `states` map. Existing `states` will be replaced.
+func loadStates(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var raw map[string]*ChatState
+	dec := json.NewDecoder(f)
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+
+	states = make(map[int64]*ChatState, len(raw))
+	for k, st := range raw {
+		id, err := strconv.ParseInt(k, 10, 64)
+		if err != nil {
+			log.Printf("warning: skipping invalid chat id in states.json: %s", k)
+			continue
+		}
+		states[id] = st
 	}
 	return nil
 }

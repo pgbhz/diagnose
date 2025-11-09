@@ -1,7 +1,10 @@
-[
-  {
-    "chat_id": 7794971170,
-    "awaiting": "1",
-    "answers": {}
+{
+  "7794971170": {
+    "Awaiting": "",
+    "Answers": {
+      "0": "Bye there."
+    },
+    "HasPending": true,
+    "PendingNext": "1"
   }
-]
+}

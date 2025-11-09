@@ -3,19 +3,19 @@
         {
             "id": "0",
             "type": "start_message",
-            "text": "Oi! Bem vindo ao questionário. Vou te levar para a mensagem dois.",
+            "text": "First message; type `start_message`",
             "next": "1"
         },
         {
             "id": "1",
             "type": "question",
-            "text": "Aqui é a mensagem dois. Vamos para a mensagem três.",
+            "text": "Second message; type `question`",
             "next": "2"
         },
         {
             "id": "2",
             "type": "end_message",
-            "text": "Esta é a mensagem três. Fim do questionário! Vou te dar oi novamente.",
+            "text": "Third message; type `end_message`",
             "next": null
         }
     ]

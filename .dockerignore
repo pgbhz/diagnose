@@ -1,0 +1,11 @@
+# Build context trimming
+.git
+data
+docs
+misc
+notebooks
+tex
+videos
+website.html
+README.md
+src/telbot
