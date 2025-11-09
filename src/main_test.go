@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -75,81 +76,91 @@ func TestLoadConversation(t *testing.T) {
 
 func TestConversationFlow(t *testing.T) {
 	resetGlobals()
+
 	originalSend := sendReply
-	sent := []string{}
+	originalClassifier := classifyPhoto
+	originalSave := savePhoto
+	defer func() {
+		sendReply = originalSend
+		classifyPhoto = originalClassifier
+		savePhoto = originalSave
+	}()
+
+	var sent []string
 	sendReply = func(id int64, text string) error {
 		sent = append(sent, fmt.Sprintf("%d:%s", id, text))
 		return nil
 	}
-	defer func() { sendReply = originalSend }()
+
+	classifyCalled := 0
+	classifyPhoto = func(ctx context.Context, path string) (bool, string, error) {
+		classifyCalled++
+		return true, "looks suspicious", nil
+	}
+
+	savePhoto = func(ctx context.Context, msg *Message) (string, error) {
+		return "/tmp/fake.jpg", nil
+	}
 
 	nodes = map[string]Node{
-		"0": {ID: "0", Type: "start_message", Text: "Welcome", Next: strPtr("1")},
-		"1": {ID: "1", Type: "question", Text: "Answer?", Next: strPtr("2")},
-		"2": {ID: "2", Type: "end_message", Text: "Done"},
+		"start": {ID: "start", Type: "start_message", Text: "Greeting", Next: strPtr("wrap")},
+		"wrap":  {ID: "wrap", Type: "end_message", Text: "Wrap"},
 	}
-	startNodeID = "0"
+	startNodeID = "start"
 
 	chatID := int64(123)
-	msg := &Message{Date: 0, Chat: Chat{ID: chatID, Username: "test"}, Text: "hi"}
+	msg := &Message{Date: 0, Chat: Chat{ID: chatID, Username: "test"}, Text: "hello"}
 	out := captureOutput(t, func() { printMessage(msg) })
 
-	if !strings.Contains(out, "[conversation] chat:123 start: Welcome") {
+	if !strings.Contains(out, "[conversation] chat:123 start: Greeting") {
 		t.Fatalf("start output missing, got: %s", out)
 	}
 
 	st := chatStateFor(chatID)
-	if st.Awaiting != "0" {
+	if st.Awaiting != "start" {
 		t.Fatalf("expected awaiting start node, got %q", st.Awaiting)
 	}
-	if !st.HasPending || st.PendingNext != "1" {
-		t.Fatalf("expected pending next '1', got pending=%v next=%q", st.HasPending, st.PendingNext)
+
+	if len(sent) != 2 {
+		t.Fatalf("expected two messages sent, got %d: %v", len(sent), sent)
+	}
+	if sent[0] != "123:Greeting" {
+		t.Fatalf("unexpected greeting message: %s", sent[0])
+	}
+	if sent[1] != "123:I need a clear photo of the inside of your mouth to continue. Please try sending an image." {
+		t.Fatalf("unexpected reminder message: %s", sent[1])
 	}
 
-	msg2 := &Message{Date: 1, Chat: Chat{ID: chatID, Username: "test"}, Text: "ok"}
+	msg2 := &Message{Date: 1, Chat: Chat{ID: chatID, Username: "test"}, Photo: []PhotoSize{{FileID: "file"}}}
 	out2 := captureOutput(t, func() { printMessage(msg2) })
 
-	if !strings.Contains(out2, "[conversation] chat:123 question(1): Answer?") {
-		t.Fatalf("question output missing, got: %s", out2)
+	if classifyCalled != 1 {
+		t.Fatalf("expected classifier to be called once, got %d", classifyCalled)
+	}
+
+	if !strings.Contains(out2, "[conversation] chat:123 end: Wrap") {
+		t.Fatalf("wrap output missing, got: %s", out2)
+	}
+
+	if len(sent) != 4 {
+		t.Fatalf("expected four messages sent, got %d: %v", len(sent), sent)
+	}
+	if !strings.Contains(sent[2], "Gemini assessment: YES") {
+		t.Fatalf("unexpected diagnosis message: %s", sent[2])
+	}
+	if sent[3] != "123:Wrap" {
+		t.Fatalf("unexpected wrap message: %s", sent[3])
 	}
 
 	st = chatStateFor(chatID)
-	if st.Awaiting != "1" {
-		t.Fatalf("expected awaiting question '1', got %q", st.Awaiting)
+	if st.Awaiting != "" {
+		t.Fatalf("expected awaiting cleared, got %q", st.Awaiting)
 	}
-	if got := st.Answers["0"]; got != "ok" {
-		t.Fatalf("expected answer for start node 'ok', got %q", got)
+	if st.HasPending {
+		t.Fatalf("expected no pending state")
 	}
-
-	msg3 := &Message{Date: 2, Chat: Chat{ID: chatID, Username: "test"}, Text: "answer"}
-	out3 := captureOutput(t, func() { printMessage(msg3) })
-
-	if !strings.Contains(out3, "[conversation] chat:123 end: Done") {
-		t.Fatalf("end output missing, got: %s", out3)
-	}
-	if !strings.Contains(out3, `[conversation] chat:123 answers: map[0:ok 1:answer]`) {
-		t.Fatalf("answers output missing, got: %s", out3)
-	}
-	if !strings.Contains(out3, "[conversation] chat:123 start: Welcome") {
-		t.Fatalf("restart output missing, got: %s", out3)
-	}
-
-	st = chatStateFor(chatID)
-	if st.Awaiting != "0" || !st.HasPending || st.PendingNext != "1" {
-		t.Fatalf("expected restarted state awaiting start, got awaiting=%q pending=%v next=%q", st.Awaiting, st.HasPending, st.PendingNext)
-	}
-	if len(st.Answers) != 0 {
-		t.Fatalf("expected answers reset, got %v", st.Answers)
-	}
-
-	expectedSent := []string{
-		"123:Welcome",
-		"123:Answer?",
-		"123:Done",
-		"123:Welcome",
-	}
-	if fmt.Sprint(sent) != fmt.Sprint(expectedSent) {
-		t.Fatalf("unexpected sent messages: got %v want %v", sent, expectedSent)
+	if !st.Started {
+		t.Fatalf("expected started to remain true")
 	}
 }
 

@@ -112,6 +112,18 @@ type GenerateOptions struct {
 	ResponseSchema   any
 }
 
+// Part represents a single prompt component that can include text or inline binary data.
+type Part struct {
+	Text       string
+	InlineData *InlineData
+}
+
+// InlineData holds base64-encoded binary payloads that Gemini can interpret, such as images.
+type InlineData struct {
+	MimeType string
+	Data     string
+}
+
 type generateRequest struct {
 	Contents          []content         `json:"contents"`
 	SystemInstruction *content          `json:"systemInstruction,omitempty"`
@@ -132,7 +144,8 @@ type content struct {
 }
 
 type part struct {
-	Text string `json:"text,omitempty"`
+	Text       string      `json:"text,omitempty"`
+	InlineData *inlineData `json:"inlineData,omitempty"`
 }
 
 type generateResponse struct {
@@ -150,72 +163,69 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
+type inlineData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
 // Ask sends a free-form prompt to the configured Gemini model and returns the textual response.
 func (c *Client) Ask(ctx context.Context, prompt string, opts *GenerateOptions) (string, error) {
 	if prompt == "" {
-		return nilStringError()
+		return "", errors.New("gemini: prompt must not be empty")
+	}
+
+	return c.AskWithParts(ctx, []Part{{Text: prompt}}, opts)
+}
+
+// AskWithParts sends a prompt composed of multiple parts, supporting multimodal requests.
+func (c *Client) AskWithParts(ctx context.Context, parts []Part, opts *GenerateOptions) (string, error) {
+	if len(parts) == 0 {
+		return "", errors.New("gemini: at least one part is required")
 	}
 
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	reqPayload, err := c.buildRequest(prompt, opts)
+	reqPayload, err := c.buildRequestFromParts(parts, opts)
 	if err != nil {
 		return "", err
 	}
 
-	body, err := json.Marshal(reqPayload)
-	if err != nil {
-		return "", fmt.Errorf("gemini: marshal request: %w", err)
-	}
-
-	endpoint := c.endpoint()
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("gemini: create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("gemini: http call failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("gemini: read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("gemini: unexpected status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var apiResp generateResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return "", fmt.Errorf("gemini: decode response: %w", err)
-	}
-
-	if apiResp.Error != nil {
-		return "", fmt.Errorf("gemini: API error %s (%d): %s", apiResp.Error.Status, apiResp.Error.Code, apiResp.Error.Message)
-	}
-
-	text, err := extractText(apiResp)
-	if err != nil {
-		return "", err
-	}
-
-	return text, nil
+	return c.doGenerate(ctx, reqPayload)
 }
 
-func (c *Client) buildRequest(prompt string, opts *GenerateOptions) (*generateRequest, error) {
+func (c *Client) buildRequestFromParts(parts []Part, opts *GenerateOptions) (*generateRequest, error) {
+	reqParts := make([]part, 0, len(parts))
+	for idx, p := range parts {
+		rp := part{}
+		if strings.TrimSpace(p.Text) != "" {
+			rp.Text = p.Text
+		}
+		if p.InlineData != nil {
+			if p.InlineData.MimeType == "" {
+				return nil, fmt.Errorf("gemini: part %d inline data missing mime type", idx)
+			}
+			if p.InlineData.Data == "" {
+				return nil, fmt.Errorf("gemini: part %d inline data missing data", idx)
+			}
+			rp.InlineData = &inlineData{
+				MimeType: p.InlineData.MimeType,
+				Data:     p.InlineData.Data,
+			}
+		}
+
+		if rp.Text == "" && rp.InlineData == nil {
+			return nil, fmt.Errorf("gemini: part %d contained no usable data", idx)
+		}
+
+		reqParts = append(reqParts, rp)
+	}
+
 	req := &generateRequest{
 		Contents: []content{
 			{
-				Parts: []part{
-					{Text: prompt},
-				},
+				Parts: reqParts,
 			},
 		},
 	}
@@ -292,6 +302,47 @@ func (c *Client) endpoint() string {
 	return fmt.Sprintf(requestPathFmt, base, url.PathEscape(c.model), url.QueryEscape(c.apiKey))
 }
 
-func nilStringError() (string, error) {
-	return "", errors.New("gemini: prompt must not be empty")
+func (c *Client) doGenerate(ctx context.Context, reqPayload *generateRequest) (string, error) {
+	body, err := json.Marshal(reqPayload)
+	if err != nil {
+		return "", fmt.Errorf("gemini: marshal request: %w", err)
+	}
+
+	endpoint := c.endpoint()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("gemini: create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("gemini: http call failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("gemini: read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("gemini: unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var apiResp generateResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return "", fmt.Errorf("gemini: decode response: %w", err)
+	}
+
+	if apiResp.Error != nil {
+		return "", fmt.Errorf("gemini: API error %s (%d): %s", apiResp.Error.Status, apiResp.Error.Code, apiResp.Error.Message)
+	}
+
+	text, err := extractText(apiResp)
+	if err != nil {
+		return "", err
+	}
+
+	return text, nil
 }

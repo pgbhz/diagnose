@@ -1,15 +1,11 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"telbot/gemini"
@@ -17,87 +13,25 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// Update mirrors the Telegram update payload that wraps incoming messages.
-type Update struct {
-	UpdateID      int      `json:"update_id"`
-	Message       *Message `json:"message"`
-	EditedMessage *Message `json:"edited_message"`
-}
+// Global runtime state and test seams.
+var (
+	nodes            map[string]Node
+	startNodeID      string
+	states           map[int64]*ChatState
+	apiBase          string
+	httpClient       *http.Client
+	assetsDir        string
+	maxDownloadBytes int64
 
-// Message captures the relevant parts of a Telegram chat message.
-type Message struct {
-	MessageID int    `json:"message_id"`
-	From      *User  `json:"from"`
-	Chat      Chat   `json:"chat"`
-	Date      int64  `json:"date"`
-	Text      string `json:"text"`
-}
+	sendReply = sendMessage
+	savePhoto = saveIncomingPhoto
 
-// User represents the Telegram account that sent a message.
-type User struct {
-	ID        int    `json:"id"`
-	IsBot     bool   `json:"is_bot"`
-	FirstName string `json:"first_name"`
-	Username  string `json:"username"`
-}
+	classifyPhoto CancerClassifier = classifyWithGemini
 
-// Chat contains the destination chat metadata Telegram includes per message.
-type Chat struct {
-	ID       int64  `json:"id"`
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Username string `json:"username"`
-}
-
-// getUpdatesResp holds the raw Telegram response for getUpdates polling.
-type getUpdatesResp struct {
-	OK     bool     `json:"ok"`
-	Result []Update `json:"result"`
-}
-
-// ConversationFile models the conversation.json structure.
-type ConversationFile struct {
-	Messages []ConvMessage `json:"messages"`
-}
-
-// ConvMessage defines an individual conversation node from conversation.json.
-type ConvMessage struct {
-	ID   string  `json:"id"`
-	Type string  `json:"type"`
-	Text string  `json:"text"`
-	Next *string `json:"next"`
-}
-
-// Node stores a normalized conversation node for runtime use.
-type Node struct {
-	ID   string
-	Type string
-	Text string
-	Next *string
-}
-
-// ChatState tracks where a chat is within the scripted conversation flow.
-type ChatState struct {
-	Awaiting    string            // question ID we're waiting answer for
-	Answers     map[string]string // questionID -> answer text
-	HasPending  bool              // true when awaiting any message before continuing
-	PendingNext string            // next node to visit once a message arrives
-}
-
-// PoemReport represents the expected structured output from Gemini.
-type PoemReport struct {
-	Poem      string `json:"poem"`
-	Rationale string `json:"rationale"`
-}
-
-var nodes map[string]Node
-var startNodeID string
-var states map[int64]*ChatState
-var apiBase string
-var httpClient *http.Client
-
-// sendReply is a function pointer used to facilitate testing sendMessage.
-var sendReply = sendMessage
+	geminiClient     *gemini.Client
+	geminiClientOnce sync.Once
+	geminiClientErr  error
+)
 
 // chatStateFor retrieves or initializes the state tracking for a chat ID.
 func chatStateFor(chatID int64) *ChatState {
@@ -105,11 +39,6 @@ func chatStateFor(chatID int64) *ChatState {
 	if st == nil {
 		st = &ChatState{Answers: make(map[string]string)}
 		states[chatID] = st
-		// Persist the new chat state immediately so we don't lose the
-		// conversation when the process restarts.
-		if err := saveStates("states.json"); err != nil {
-			log.Printf("warning: could not save states after init: %v", err)
-		}
 	}
 	return st
 }
@@ -125,14 +54,23 @@ func main() {
 
 	base := "https://api.telegram.org/bot" + token + "/"
 	apiBase = base
-	log.Println("Starting telbot long-polling...")
-
-	if prompt := os.Getenv("GEMINI_PROMPT"); prompt != "" {
-		log.Printf("sending message to Gemini")
-		sendPromptToGemini(prompt)
-	} else {
-		log.Printf("no GEMINI_PROMPT set, skipping Gemini request")
+	// Configure runtime assets directory and download limits from environment.
+	assetsDir = os.Getenv("ASSETS_DIR")
+	if assetsDir == "" {
+		assetsDir = "assets"
 	}
+
+	// MAX_FILE_BYTES is optional, default to 20MB if not set or invalid.
+	if v := os.Getenv("MAX_FILE_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			maxDownloadBytes = n
+		} else {
+			maxDownloadBytes = 20 * 1024 * 1024
+		}
+	} else {
+		maxDownloadBytes = 20 * 1024 * 1024
+	}
+	log.Println("Starting telbot long-polling...")
 
 	// load conversation.json if present
 	states = make(map[int64]*ChatState)
@@ -140,13 +78,6 @@ func main() {
 		log.Printf("warning: could not load conversation.json: %v", err)
 	} else {
 		log.Printf("conversation loaded, start node: %s", startNodeID)
-	}
-
-	// attempt to load persisted chat states (if any)
-	if err := loadStates("states.json"); err != nil {
-		log.Printf("warning: could not load states.json: %v", err)
-	} else {
-		log.Printf("loaded %d chat states", len(states))
 	}
 
 	offset := 0
@@ -174,287 +105,4 @@ func main() {
 			}
 		}
 	}
-}
-
-// sendPromptToGemini forwards a prompt to the Gemini API and prints the response.
-func sendPromptToGemini(prompt string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	client, err := gemini.NewClient()
-	if err != nil {
-		log.Printf("gemini client init error: %v", err)
-		return
-	}
-
-	schema := map[string]any{
-		"type": "array",
-		"items": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"poem":      map[string]string{"type": "string"},
-				"rationale": map[string]string{"type": "string"},
-			},
-			"required": []string{"poem", "rationale"},
-		},
-	}
-
-	opts := &gemini.GenerateOptions{
-		ResponseMimeType: "application/json",
-		ResponseSchema:   schema,
-	}
-
-	responseText, err := client.Ask(ctx, prompt, opts)
-	if err != nil {
-		log.Printf("gemini ask error: %v", err)
-		return
-	}
-
-	fmt.Printf("[gemini] raw response: %s\n", responseText)
-
-	var reports []PoemReport
-	if err := json.Unmarshal([]byte(responseText), &reports); err != nil {
-		log.Printf("gemini response parse error: %v", err)
-		return
-	}
-
-	for idx, report := range reports {
-		fmt.Printf("[gemini] report %d: poem=%s rationale=%s\n", idx+1, report.Poem, report.Rationale)
-	}
-}
-
-// getUpdates polls the Telegram Bot API for new updates, respecting offset.
-func getUpdates(client *http.Client, base string, offset int, timeout int) ([]Update, error) {
-	url := fmt.Sprintf(base+"getUpdates?offset=%d&timeout=%d", offset, timeout)
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("telegram API status %d: %s", resp.StatusCode, string(b))
-	}
-
-	var r getUpdatesResp
-	dec := json.NewDecoder(resp.Body)
-	if err := dec.Decode(&r); err != nil {
-		return nil, err
-	}
-
-	if !r.OK {
-		return nil, fmt.Errorf("telegram API returned ok=false")
-	}
-
-	return r.Result, nil
-}
-
-// printMessage logs a message and advances the scripted conversation if needed.
-func printMessage(m *Message) {
-	ts := time.Unix(m.Date, 0).Format(time.RFC3339)
-	from := ""
-	if m.From != nil {
-		from = fmt.Sprintf("%s (@%s)", m.From.FirstName, m.From.Username)
-	}
-	chat := m.Chat.Username
-	if chat == "" {
-		chat = m.Chat.Title
-	}
-	// Print raw message
-	fmt.Printf("[%s] chat:%s from:%s text:%s\n", ts, chat, from, strconv.Quote(m.Text))
-
-	// If we have a conversation loaded, handle state transitions
-	if nodes == nil || startNodeID == "" {
-		return
-	}
-
-	chID := m.Chat.ID
-	st := chatStateFor(chID)
-
-	switch {
-	case st.Awaiting != "":
-		// Persist the answer and follow the question's next pointer
-		qid := st.Awaiting
-		st.Answers[qid] = m.Text
-		st.Awaiting = ""
-		// Persist the updated state (answer recorded)
-		if err := saveStates("states.json"); err != nil {
-			log.Printf("warning: could not save states after answer: %v", err)
-		}
-		// Move to next node after this question
-		if n, ok := nodes[qid]; ok && n.Next != nil {
-			advanceChatState(chID, *n.Next)
-		}
-		return
-	case st.HasPending:
-		// Consume pending reply and advance to the queued node
-		nextID := st.PendingNext
-		st.HasPending = false
-		st.PendingNext = ""
-		if nextID != "" {
-			advanceChatState(chID, nextID)
-		}
-		return
-	}
-
-	// No outstanding state: begin conversation at the start node
-	if startNodeID != "" {
-		advanceChatState(chID, startNodeID)
-	}
-}
-
-// advanceChatState handles visiting a node ID for a chat.
-func advanceChatState(chatID int64, nodeID string) {
-	n, ok := nodes[nodeID]
-	if !ok {
-		log.Printf("unknown node %s", nodeID)
-		return
-	}
-	st := chatStateFor(chatID)
-	switch n.Type {
-	case "start_message":
-		// await any input
-		st.Awaiting = n.ID
-
-		// print the start message text and move to next if present
-		fmt.Printf("[conversation] chat:%d start: %s\n", chatID, n.Text)
-		if err := sendReply(chatID, n.Text); err != nil {
-			log.Printf("send start message error: %v", err)
-		}
-		if n.Next != nil {
-			st.PendingNext = *n.Next
-			st.HasPending = true
-		} else {
-			st.HasPending = false
-			st.PendingNext = ""
-		}
-	case "question":
-		// set awaiting to this question id
-		st.Awaiting = n.ID
-		fmt.Printf("[conversation] chat:%d question(%s): %s\n", chatID, n.ID, n.Text)
-		if err := sendReply(chatID, n.Text); err != nil {
-			log.Printf("send question error: %v", err)
-		}
-	case "end_message":
-		// print end text and restart (clear state)
-		fmt.Printf("[conversation] chat:%d end: %s\n", chatID, n.Text)
-		if err := sendReply(chatID, n.Text); err != nil {
-			log.Printf("send end message error: %v", err)
-		}
-
-		// show answers stored
-		fmt.Printf("[conversation] chat:%d answers: %v\n", chatID, st.Answers)
-
-		// restart: clear state
-		states[chatID] = &ChatState{Answers: make(map[string]string)}
-
-		// after restart, call start again
-		if startNodeID != "" {
-			advanceChatState(chatID, startNodeID)
-		}
-	default:
-		log.Printf("unhandled node type %s", n.Type)
-	}
-}
-
-// sendMessage posts a text reply to the Telegram Bot API.
-func sendMessage(chatID int64, text string) error {
-	if httpClient == nil || apiBase == "" {
-		return fmt.Errorf("telegram client not initialised")
-	}
-
-	values := url.Values{}
-	values.Set("chat_id", strconv.FormatInt(chatID, 10))
-	values.Set("text", text)
-
-	resp, err := httpClient.PostForm(apiBase+"sendMessage", values)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("sendMessage status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-// loadConversation loads a conversation JSON file into the nodes map.
-func loadConversation(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	var cf ConversationFile
-	dec := json.NewDecoder(f)
-	if err := dec.Decode(&cf); err != nil {
-		return err
-	}
-	nodes = make(map[string]Node)
-	// Map messages to nodes
-	for i, m := range cf.Messages {
-		nodes[m.ID] = Node(m)
-		// pick first message of type start_message as start
-		if startNodeID == "" && m.Type == "start_message" {
-			startNodeID = m.ID
-		}
-		// fallback: if no explicit start, use first message
-		if startNodeID == "" && i == 0 {
-			startNodeID = m.ID
-		}
-	}
-	return nil
-}
-
-// saveStates writes the in-memory chat states to the given file path as JSON.
-// Keys (chat IDs) are stored as strings to produce valid JSON object keys.
-func saveStates(path string) error {
-	if states == nil {
-		// nothing to persist
-		return nil
-	}
-	out := make(map[string]*ChatState, len(states))
-	for id, st := range states {
-		out[strconv.FormatInt(id, 10)] = st
-	}
-	b, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-// loadStates attempts to read persisted chat states from the given file and
-// populate the global `states` map. Existing `states` will be replaced.
-func loadStates(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	var raw map[string]*ChatState
-	dec := json.NewDecoder(f)
-	if err := dec.Decode(&raw); err != nil {
-		return err
-	}
-
-	states = make(map[int64]*ChatState, len(raw))
-	for k, st := range raw {
-		id, err := strconv.ParseInt(k, 10, 64)
-		if err != nil {
-			log.Printf("warning: skipping invalid chat id in states.json: %s", k)
-			continue
-		}
-		states[id] = st
-	}
-	return nil
 }

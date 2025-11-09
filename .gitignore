@@ -1,5 +1,5 @@
-docs/research_project/
-docs/papers/
+research_project/
+papers/
 .env
 data/
 misc/
