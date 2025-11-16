@@ -3,7 +3,7 @@ papers/
 .env
 data/
 misc/
-notebooks/
+notebooks/secret/
 src/assets/
 src/configs/
 tex/
