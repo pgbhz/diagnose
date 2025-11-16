@@ -22,6 +22,7 @@ var (
 	httpClient       *http.Client
 	assetsDir        string
 	maxDownloadBytes int64
+	authUsers        map[string]string
 
 	sendReply = sendMessage
 	savePhoto = saveIncomingPhoto
@@ -72,18 +73,24 @@ func main() {
 	}
 	log.Println("Starting telbot long-polling...")
 
-	// load conversation.json if present
+	// load conversation graph if present
 	states = make(map[int64]*ChatState)
 	if err := loadConversation("configs/conversation.json"); err != nil {
 		log.Printf("warning: could not load conversation.json: %v", err)
 	} else {
 		log.Printf("conversation loaded, start node: %s", startNodeID)
 	}
+	if err := loadAuth("configs/auth.json"); err != nil {
+		log.Printf("warning: could not load auth.json: %v", err)
+	} else {
+		log.Printf("auth credentials loaded (%d users)", len(authUsers))
+	}
 
 	offset := 0
 	client := &http.Client{Timeout: 60 * time.Second}
 	httpClient = client
 
+	// loop and transition
 	for {
 		updates, err := getUpdates(client, base, offset, 30)
 		if err != nil {

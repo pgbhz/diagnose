@@ -68,6 +68,9 @@ func printMessage(m *Message) {
 		startedNow = true
 		advanceChatState(chID, startNodeID)
 	}
+	if startedNow {
+		return
+	}
 
 	var photoPath string
 
@@ -83,22 +86,32 @@ func printMessage(m *Message) {
 		}
 	}
 
-	if startedNow && photoPath == "" {
-		return
-	}
-
-	if st.Awaiting != "" && photoPath == "" {
-		if !applyTransition(chID, st.Awaiting, false) {
-			if err := sendReply(chID, "I need a clear photo of the inside of your mouth to continue. Please try sending an image."); err != nil {
-				log.Printf("send reminder error: %v", err)
+	currentNodeID := st.Awaiting
+	if currentNodeID != "" {
+		node, ok := nodes[currentNodeID]
+		if ok {
+			if node.Type == "question" {
+				text := strings.TrimSpace(m.Text)
+				if text == "" {
+					if err := sendReply(chID, "Please reply with text so we can continue."); err != nil {
+						log.Printf("send text reminder error: %v", err)
+					}
+					return
+				}
+				handleQuestionAnswer(chID, currentNodeID, text)
+				return
+			}
+			if node.ExpectPhoto {
+				if photoPath == "" {
+					if err := sendReply(chID, "I need a clear photo of the inside of your mouth to continue. Please try sending an image."); err != nil {
+						log.Printf("send reminder error: %v", err)
+					}
+					return
+				}
+				handlePhotoMessage(chID, m, photoPath)
+				return
 			}
 		}
-		return
-	}
-
-	if photoPath != "" {
-		handlePhotoMessage(chID, m, photoPath)
-		return
 	}
 }
 
@@ -112,14 +125,22 @@ func advanceChatState(chatID int64, nodeID string) {
 	st := chatStateFor(chatID)
 	switch n.Type {
 	case "start_message":
-		// await any input
-		st.Awaiting = n.ID
 		st.Started = true
+		if n.ExpectPhoto {
+			st.Awaiting = n.ID
+		} else {
+			st.Awaiting = ""
+		}
 
 		// print the start message text
 		fmt.Printf("[conversation] chat:%d start: %s\n", chatID, n.Text)
 		if err := sendReply(chatID, n.Text); err != nil {
 			log.Printf("send start message error: %v", err)
+		}
+		if !n.ExpectPhoto && n.SuccessTransition != nil && *n.SuccessTransition != "" {
+			if !applyTransition(chatID, n.ID, true) {
+				log.Printf("unable to follow success transition from %s", n.ID)
+			}
 		}
 	case "question":
 		// set awaiting to this question id
@@ -180,6 +201,84 @@ func applyTransition(chatID int64, nodeID string, success bool) bool {
 
 	advanceChatState(chatID, *nextID)
 	return true
+}
+
+// handleQuestionAnswer directs username/password inputs through authentication checks.
+func handleQuestionAnswer(chatID int64, nodeID, answer string) {
+	st := chatStateFor(chatID)
+	trimmed := strings.TrimSpace(answer)
+	switch nodeID {
+	case "login_username":
+		if trimmed == "" || !userExists(trimmed) {
+			if err := sendReply(chatID, "I couldn't find that username. Please try again."); err != nil {
+				log.Printf("send username failure: %v", err)
+			}
+			applyTransition(chatID, nodeID, false)
+			return
+		}
+		st.Username = trimmed
+		applyTransition(chatID, nodeID, true)
+	case "login_password":
+		if st.Username == "" {
+			if err := sendReply(chatID, "Please provide your username before sending the password."); err != nil {
+				log.Printf("send username reminder: %v", err)
+			}
+			applyTransition(chatID, nodeID, false)
+			return
+		}
+		if !verifyPassword(st.Username, trimmed) {
+			if err := sendReply(chatID, "The password did not match. Please try again."); err != nil {
+				log.Printf("send password failure: %v", err)
+			}
+			applyTransition(chatID, nodeID, false)
+			return
+		}
+		st.Authed = true
+		applyTransition(chatID, nodeID, true)
+	default:
+		if trimmed != "" {
+			st.Answers[nodeID] = trimmed
+		}
+		applyTransition(chatID, nodeID, true)
+	}
+}
+
+// loadAuth reads credentials from disk to enable authentication checks.
+func loadAuth(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var af AuthFile
+	dec := json.NewDecoder(f)
+	if err := dec.Decode(&af); err != nil {
+		return err
+	}
+	authUsers = make(map[string]string, len(af.Users))
+	for _, u := range af.Users {
+		authUsers[u.Username] = u.Password
+	}
+	return nil
+}
+
+func userExists(username string) bool {
+	if authUsers == nil || username == "" {
+		return false
+	}
+	_, ok := authUsers[username]
+	return ok
+}
+
+func verifyPassword(username, password string) bool {
+	if authUsers == nil {
+		return false
+	}
+	stored, ok := authUsers[username]
+	if !ok {
+		return false
+	}
+	return stored == password
 }
 
 // saveIncomingPhoto retrieves the largest photo variant from a message and writes

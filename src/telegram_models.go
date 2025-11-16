@@ -74,6 +74,18 @@ type ConvMessage struct {
 	Text              string  `json:"text"`
 	SuccessTransition *string `json:"success_transition"`
 	FailTransition    *string `json:"fail_transition"`
+	ExpectPhoto       bool    `json:"expect_photo,omitempty"`
+}
+
+// AuthFile models the authentication JSON structure.
+type AuthFile struct {
+	Users []AuthUser `json:"users"`
+}
+
+// AuthUser keeps a username/password pair.
+type AuthUser struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 // Node stores a normalized conversation node for runtime use.
@@ -83,6 +95,7 @@ type Node struct {
 	Text              string
 	SuccessTransition *string
 	FailTransition    *string
+	ExpectPhoto       bool
 }
 
 // ChatState tracks where a chat is within the scripted conversation flow.
@@ -90,4 +103,6 @@ type ChatState struct {
 	Awaiting string            // node ID awaiting a response
 	Answers  map[string]string // questionID -> answer text (reserved for future use)
 	Started  bool              // true once we've sent the initial greeting
+	Username string            // username supplied by chat
+	Authed   bool              // true once credentials verified
 }
