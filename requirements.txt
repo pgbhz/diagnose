@@ -1,0 +1,14 @@
+# Requirements for notebooks/oral_cancer_detection.ipynb
+# Minimal set of packages needed to run the notebook. Add versions if necessary.
+numpy
+pandas
+matplotlib
+opencv-python
+scikit-learn
+tensorflow
+tensorflow.keras
+Pillow
+seaborn
+google.generativeai
+jupyter
+notebook
