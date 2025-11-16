@@ -69,25 +69,25 @@ type ConversationFile struct {
 
 // ConvMessage defines an individual conversation node from conversation.json.
 type ConvMessage struct {
-	ID   string  `json:"id"`
-	Type string  `json:"type"`
-	Text string  `json:"text"`
-	Next *string `json:"next"`
+	ID                string  `json:"id"`
+	Type              string  `json:"type"`
+	Text              string  `json:"text"`
+	SuccessTransition *string `json:"success_transition"`
+	FailTransition    *string `json:"fail_transition"`
 }
 
 // Node stores a normalized conversation node for runtime use.
 type Node struct {
-	ID   string
-	Type string
-	Text string
-	Next *string
+	ID                string
+	Type              string
+	Text              string
+	SuccessTransition *string
+	FailTransition    *string
 }
 
 // ChatState tracks where a chat is within the scripted conversation flow.
 type ChatState struct {
-	Awaiting    string            // question ID we're waiting answer for
-	Answers     map[string]string // questionID -> answer text
-	HasPending  bool              // true when awaiting any message before continuing
-	PendingNext string            // next node to visit once a message arrives
-	Started     bool              // true once we've sent the initial greeting
+	Awaiting string            // node ID awaiting a response
+	Answers  map[string]string // questionID -> answer text (reserved for future use)
+	Started  bool              // true once we've sent the initial greeting
 }

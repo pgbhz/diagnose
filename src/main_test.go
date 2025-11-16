@@ -47,7 +47,7 @@ func TestLoadConversation(t *testing.T) {
 
 	dir := t.TempDir()
 	path := dir + "/conv.json"
-	data := `{"messages":[{"id":"start","type":"start_message","text":"start here","next":"q"},{"id":"q","type":"question","text":"question","next":"end"},{"id":"end","type":"end_message","text":"bye"}]}`
+	data := `{"messages":[{"id":"start","type":"start_message","text":"start here","success_transition":"q","fail_transition":"start"},{"id":"q","type":"question","text":"question","success_transition":"end","fail_transition":"start"},{"id":"end","type":"end_message","text":"bye","success_transition":null,"fail_transition":null}]}`
 
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatalf("failed to write temp conversation: %v", err)
@@ -69,8 +69,12 @@ func TestLoadConversation(t *testing.T) {
 		t.Fatalf("unexpected start node type %q", startNode.Type)
 	}
 
-	if nodes["q"].Next == nil || *nodes["q"].Next != "end" {
-		t.Fatalf("question node next not wired correctly")
+	q := nodes["q"]
+	if q.SuccessTransition == nil || *q.SuccessTransition != "end" {
+		t.Fatalf("question node success transition not wired correctly")
+	}
+	if q.FailTransition == nil || *q.FailTransition != "start" {
+		t.Fatalf("question node fail transition not wired correctly")
 	}
 }
 
@@ -103,8 +107,18 @@ func TestConversationFlow(t *testing.T) {
 	}
 
 	nodes = map[string]Node{
-		"start": {ID: "start", Type: "start_message", Text: "Greeting", Next: strPtr("wrap")},
-		"wrap":  {ID: "wrap", Type: "end_message", Text: "Wrap"},
+		"start": {
+			ID:                "start",
+			Type:              "start_message",
+			Text:              "Greeting",
+			SuccessTransition: strPtr("wrap"),
+			FailTransition:    strPtr("start"),
+		},
+		"wrap": {
+			ID:   "wrap",
+			Type: "end_message",
+			Text: "Wrap",
+		},
 	}
 	startNodeID = "start"
 
@@ -121,31 +135,42 @@ func TestConversationFlow(t *testing.T) {
 		t.Fatalf("expected awaiting start node, got %q", st.Awaiting)
 	}
 
-	if len(sent) != 2 {
-		t.Fatalf("expected two messages sent, got %d: %v", len(sent), sent)
+	if len(sent) != 1 {
+		t.Fatalf("expected one message sent, got %d: %v", len(sent), sent)
 	}
 	if sent[0] != "123:Greeting" {
 		t.Fatalf("unexpected greeting message: %s", sent[0])
 	}
-	if sent[1] != "123:I need a clear photo of the inside of your mouth to continue. Please try sending an image." {
-		t.Fatalf("unexpected reminder message: %s", sent[1])
+
+	msgNoPhoto := &Message{Date: 1, Chat: Chat{ID: chatID, Username: "test"}, Text: "still nope"}
+	out2 := captureOutput(t, func() { printMessage(msgNoPhoto) })
+
+	if !strings.Contains(out2, "[conversation] chat:123 start: Greeting") {
+		t.Fatalf("expected conversation to restart on fail, got: %s", out2)
 	}
 
-	msg2 := &Message{Date: 1, Chat: Chat{ID: chatID, Username: "test"}, Photo: []PhotoSize{{FileID: "file"}}}
-	out2 := captureOutput(t, func() { printMessage(msg2) })
+	if len(sent) != 2 {
+		t.Fatalf("expected two messages sent after fail, got %d: %v", len(sent), sent)
+	}
+	if sent[1] != "123:Greeting" {
+		t.Fatalf("unexpected fail reminder message: %s", sent[1])
+	}
+
+	msgPhoto := &Message{Date: 2, Chat: Chat{ID: chatID, Username: "test"}, Photo: []PhotoSize{{FileID: "file"}}}
+	out3 := captureOutput(t, func() { printMessage(msgPhoto) })
 
 	if classifyCalled != 1 {
 		t.Fatalf("expected classifier to be called once, got %d", classifyCalled)
 	}
 
-	if !strings.Contains(out2, "[conversation] chat:123 end: Wrap") {
-		t.Fatalf("wrap output missing, got: %s", out2)
+	if !strings.Contains(out3, "[conversation] chat:123 end: Wrap") {
+		t.Fatalf("wrap output missing, got: %s", out3)
 	}
 
 	if len(sent) != 4 {
 		t.Fatalf("expected four messages sent, got %d: %v", len(sent), sent)
 	}
-	if !strings.Contains(sent[2], "Gemini assessment: YES") {
+	if !strings.Contains(sent[2], "Model's assessment") {
 		t.Fatalf("unexpected diagnosis message: %s", sent[2])
 	}
 	if sent[3] != "123:Wrap" {
@@ -155,9 +180,6 @@ func TestConversationFlow(t *testing.T) {
 	st = chatStateFor(chatID)
 	if st.Awaiting != "" {
 		t.Fatalf("expected awaiting cleared, got %q", st.Awaiting)
-	}
-	if st.HasPending {
-		t.Fatalf("expected no pending state")
 	}
 	if !st.Started {
 		t.Fatalf("expected started to remain true")

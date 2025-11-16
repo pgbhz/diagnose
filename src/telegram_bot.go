@@ -63,8 +63,9 @@ func printMessage(m *Message) {
 
 	chID := m.Chat.ID
 	st := chatStateFor(chID)
-
+	startedNow := false
 	if !st.Started && startNodeID != "" {
+		startedNow = true
 		advanceChatState(chID, startNodeID)
 	}
 
@@ -82,36 +83,21 @@ func printMessage(m *Message) {
 		}
 	}
 
-	if photoPath != "" {
-		handlePhotoMessage(chID, m, photoPath)
+	if startedNow && photoPath == "" {
+		return
 	}
 
-	switch {
-	case st.Awaiting != "":
-		// Persist the answer and follow the question's next pointer
-		if photoPath == "" {
+	if st.Awaiting != "" && photoPath == "" {
+		if !applyTransition(chID, st.Awaiting, false) {
 			if err := sendReply(chID, "I need a clear photo of the inside of your mouth to continue. Please try sending an image."); err != nil {
 				log.Printf("send reminder error: %v", err)
 			}
-			return
-		}
-		qid := st.Awaiting
-		st.Answers[qid] = m.Text
-		st.Awaiting = ""
-
-		// Move to next node after this question
-		if n, ok := nodes[qid]; ok && n.Next != nil {
-			advanceChatState(chID, *n.Next)
 		}
 		return
-	case st.HasPending:
-		// Consume pending reply and advance to the queued node
-		nextID := st.PendingNext
-		st.HasPending = false
-		st.PendingNext = ""
-		if nextID != "" {
-			advanceChatState(chID, nextID)
-		}
+	}
+
+	if photoPath != "" {
+		handlePhotoMessage(chID, m, photoPath)
 		return
 	}
 }
@@ -130,17 +116,10 @@ func advanceChatState(chatID int64, nodeID string) {
 		st.Awaiting = n.ID
 		st.Started = true
 
-		// print the start message text and move to next if present
+		// print the start message text
 		fmt.Printf("[conversation] chat:%d start: %s\n", chatID, n.Text)
 		if err := sendReply(chatID, n.Text); err != nil {
 			log.Printf("send start message error: %v", err)
-		}
-		if n.Next != nil {
-			st.PendingNext = *n.Next
-			st.HasPending = true
-		} else {
-			st.HasPending = false
-			st.PendingNext = ""
 		}
 	case "question":
 		// set awaiting to this question id
@@ -161,9 +140,46 @@ func advanceChatState(chatID int64, nodeID string) {
 
 		// restart: clear state
 		states[chatID] = &ChatState{Answers: make(map[string]string), Started: true}
+
+		if n.SuccessTransition != nil && *n.SuccessTransition != "" {
+			advanceChatState(chatID, *n.SuccessTransition)
+		}
 	default:
 		log.Printf("unhandled node type %s", n.Type)
 	}
+}
+
+// applyTransition advances the chat based on the outcome of an awaiting node.
+func applyTransition(chatID int64, nodeID string, success bool) bool {
+	if nodeID == "" {
+		return false
+	}
+	n, ok := nodes[nodeID]
+	if !ok {
+		log.Printf("transition requested for unknown node %s", nodeID)
+		return false
+	}
+
+	st := chatStateFor(chatID)
+	var nextID *string
+	if success {
+		nextID = n.SuccessTransition
+		if st.Awaiting == nodeID {
+			st.Awaiting = ""
+		}
+	} else {
+		nextID = n.FailTransition
+		if nextID != nil && *nextID != "" && st.Awaiting == nodeID {
+			st.Awaiting = ""
+		}
+	}
+
+	if nextID == nil || *nextID == "" {
+		return false
+	}
+
+	advanceChatState(chatID, *nextID)
+	return true
 }
 
 // saveIncomingPhoto retrieves the largest photo variant from a message and writes
@@ -293,6 +309,7 @@ func loadConversation(path string) error {
 		return err
 	}
 	nodes = make(map[string]Node)
+	startNodeID = ""
 	// Map messages to nodes
 	for i, m := range cf.Messages {
 		nodes[m.ID] = Node(m)
@@ -311,12 +328,17 @@ func loadConversation(path string) error {
 func handlePhotoMessage(chatID int64, msg *Message, photoPath string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	st := chatStateFor(chatID)
+	awaitingID := st.Awaiting
 
 	answer, rationale, err := classifyPhoto(ctx, photoPath)
 	if err != nil {
 		log.Printf("model analysis error chat:%d message:%d: %v", chatID, msg.MessageID, err)
 		if sendErr := sendReply(chatID, "I couldn't analyse that photo. Please try again with a clearer picture or lighting."); sendErr != nil {
 			log.Printf("send analysis failure message error: %v", sendErr)
+		}
+		if awaitingID != "" {
+			_ = applyTransition(chatID, awaitingID, false)
 		}
 		return
 	}
@@ -325,9 +347,18 @@ func handlePhotoMessage(chatID int64, msg *Message, photoPath string) {
 	if answer {
 		verdict = "Yes. The image may show signs consistent with oral cancer."
 	}
+	if awaitingID != "" {
+		st.Answers[awaitingID] = verdict
+	}
 
-	reply := fmt.Sprintf("Model's assessment: %s\n\nRationale: %s\n\nThis is an AI assessment and not a medical diagnosis. Please consult a qualified professional for concerns.", verdict, rationale)
+	reply := fmt.Sprintf("Model's assessment: %s\n\nRationale: %s\n\nThis is an AI assessment and not a medical diagnosis.\nPlease consult a qualified professional for concerns.", verdict, rationale)
 	if err := sendReply(chatID, reply); err != nil {
 		log.Printf("send diagnosis message error: %v", err)
+	}
+
+	if awaitingID != "" {
+		if !applyTransition(chatID, awaitingID, true) {
+			log.Printf("no success transition defined for node %s", awaitingID)
+		}
 	}
 }
