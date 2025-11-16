@@ -7,3 +7,4 @@ notebooks/
 src/assets/
 src/configs/
 tex/
+.venv/
