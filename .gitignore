@@ -8,3 +8,4 @@ src/assets/
 src/configs/
 tex/
 .venv/
+__pycache__
