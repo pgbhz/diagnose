@@ -13,7 +13,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// Global runtime state and test seams.
+// Global runtime state.
 var (
 	nodes            map[string]Node
 	startNodeID      string
@@ -23,6 +23,9 @@ var (
 	assetsDir        string
 	maxDownloadBytes int64
 	authUsers        map[string]string
+	diagnosisLog     map[string][]DiagnosisEntry
+	diagnosisFile    string
+	diagnosisMu      sync.Mutex
 
 	sendReply = sendMessage
 	savePhoto = saveIncomingPhoto
@@ -44,7 +47,7 @@ func chatStateFor(chatID int64) *ChatState {
 	return st
 }
 
-// main boots the Telegram polling loop and optional Gemini prompt handling.
+// main boots the Telegram polling loop and model's client prompt handling.
 func main() {
 	_ = godotenv.Load()
 
@@ -55,6 +58,7 @@ func main() {
 
 	base := "https://api.telegram.org/bot" + token + "/"
 	apiBase = base
+
 	// Configure runtime assets directory and download limits from environment.
 	assetsDir = os.Getenv("ASSETS_DIR")
 	if assetsDir == "" {
@@ -71,7 +75,7 @@ func main() {
 	} else {
 		maxDownloadBytes = 20 * 1024 * 1024
 	}
-	log.Println("Starting telbot long-polling...")
+	log.Println("starting telbot long-polling...")
 
 	// load conversation graph if present
 	states = make(map[int64]*ChatState)
@@ -84,6 +88,11 @@ func main() {
 		log.Printf("warning: could not load auth.json: %v", err)
 	} else {
 		log.Printf("auth credentials loaded (%d users)", len(authUsers))
+	}
+	if err := loadDiagnosis("configs/diagnosis.json"); err != nil {
+		log.Printf("warning: could not load diagnosis.json: %v", err)
+	} else {
+		log.Printf("diagnosis history entries: %d", len(diagnosisLog))
 	}
 
 	offset := 0

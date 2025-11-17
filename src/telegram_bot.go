@@ -42,7 +42,7 @@ func getUpdates(client *http.Client, base string, offset int, timeout int) ([]Up
 	return r.Result, nil
 }
 
-// printMessage logs a message and advances the scripted conversation if needed.
+// printMessage logs a message and advances the conversation if needed.
 func printMessage(m *Message) {
 	ts := time.Unix(m.Date, 0).Format(time.RFC3339)
 	from := ""
@@ -281,6 +281,66 @@ func verifyPassword(username, password string) bool {
 	return stored == password
 }
 
+// loadDiagnosis initialises the diagnosis log from disk, creating the file if needed.
+func loadDiagnosis(path string) error {
+	diagnosisMu.Lock()
+	defer diagnosisMu.Unlock()
+	diagnosisFile = path
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			diagnosisLog = make(map[string][]DiagnosisEntry)
+			return persistDiagnosisLocked()
+		}
+		return err
+	}
+	if len(data) == 0 {
+		diagnosisLog = make(map[string][]DiagnosisEntry)
+		return persistDiagnosisLocked()
+	}
+	if err := json.Unmarshal(data, &diagnosisLog); err != nil {
+		return err
+	}
+	if diagnosisLog == nil {
+		diagnosisLog = make(map[string][]DiagnosisEntry)
+	}
+	return nil
+}
+
+func persistDiagnosisLocked() error {
+	if diagnosisFile == "" {
+		return fmt.Errorf("diagnosis file path not configured")
+	}
+	if diagnosisLog == nil {
+		diagnosisLog = make(map[string][]DiagnosisEntry)
+	}
+	data, err := json.MarshalIndent(diagnosisLog, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(diagnosisFile, data, 0600)
+}
+
+func recordDiagnosis(username, photoPath string, verdict bool, rationale string) error {
+	if username == "" {
+		return fmt.Errorf("username is required to record diagnosis")
+	}
+	entry := DiagnosisEntry{
+		PhotoPath: photoPath,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Verdict:   verdict,
+		Rationale: rationale,
+	}
+	diagnosisMu.Lock()
+	if diagnosisLog == nil {
+		diagnosisLog = make(map[string][]DiagnosisEntry)
+	}
+	diagnosisLog[username] = append(diagnosisLog[username], entry)
+	err := persistDiagnosisLocked()
+	diagnosisMu.Unlock()
+	return err
+}
+
 // saveIncomingPhoto retrieves the largest photo variant from a message and writes
 // it to the assets directory, returning the saved file path.
 func saveIncomingPhoto(ctx context.Context, msg *Message) (string, error) {
@@ -448,6 +508,13 @@ func handlePhotoMessage(chatID int64, msg *Message, photoPath string) {
 	}
 	if awaitingID != "" {
 		st.Answers[awaitingID] = verdict
+	}
+	if st.Username != "" {
+		if err := recordDiagnosis(st.Username, photoPath, answer, rationale); err != nil {
+			log.Printf("record diagnosis error: %v", err)
+		}
+	} else {
+		log.Printf("skipping diagnosis log for chat:%d: username not set", chatID)
 	}
 
 	reply := fmt.Sprintf("Model's assessment: %s\n\nRationale: %s\n\nThis is an AI assessment and not a medical diagnosis.\nPlease consult a qualified professional for concerns.", verdict, rationale)

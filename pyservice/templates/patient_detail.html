@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<a class="back-link" href="/">← Back to patients</a>
+<h2>Patient: {{ patient_id }}</h2>
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>Verdict</th>
+                <th>Rationale</th>
+                <th>Photo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if entries %}
+            {% for entry in entries %}
+            {% set verdict_class = "positive" if entry.verdict == "Positive" else ("negative" if entry.verdict ==
+            "Negative" else "unknown") %}
+            <tr>
+                <td>{{ entry.timestamp }}</td>
+                <td><span class="badge {{ verdict_class }}">{{ entry.verdict }}</span></td>
+                <td>{{ entry.rationale or "—" }}</td>
+                <td>
+                    {% if entry.photo_url %}
+                    <a href="{{ entry.photo_url }}" target="_blank">View photo</a>
+                    {% elif entry.photo_path %}
+                    {{ entry.photo_path }}
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+                <td colspan="4">No entries recorded for this patient.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

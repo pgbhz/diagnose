@@ -1,0 +1,37 @@
+version: "3.11"
+
+services:
+  telbot:
+    build:
+      context: .
+      target: telbot
+    image: diagnose-telbot:latest
+    env_file:
+      - src/.env
+    environment:
+      - CONFIG_DIR=/app/configs
+      - ASSETS_DIR=/app/assets
+    volumes:
+      - ./src/configs:/app/configs:ro
+      - ./src/assets:/app/assets
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    image: diagnose-dashboard:latest
+    env_file:
+      - src/.env
+    environment:
+      - CONFIG_DIR=/app/configs
+      - ASSETS_DIR=/app/assets
+      - FASTAPI_PORT=8000
+    depends_on:
+      - telbot
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src/configs:/app/configs:ro
+      - ./src/assets:/app/assets:ro
+    restart: unless-stopped

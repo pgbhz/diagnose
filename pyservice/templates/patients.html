@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Patients</h2>
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Patient</th>
+                <th>Entries</th>
+                <th>Latest verdict</th>
+                <th>Last updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if patients %}
+            {% for row in patients %}
+            <tr class="clickable" onclick="window.location.href='/patients/{{ row.patient_id }}';">
+                <td>{{ row.patient_id }}</td>
+                <td>{{ row.entry_count }}</td>
+                {% set verdict_class = "positive" if row.latest_verdict == "Positive" else ("negative" if
+                row.latest_verdict == "Negative" else "unknown") %}
+                <td><span class="badge {{ verdict_class }}">{{ row.latest_verdict }}</span></td>
+                <td>{{ row.latest_timestamp }}</td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+                <td colspan="4">No diagnosis entries available.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

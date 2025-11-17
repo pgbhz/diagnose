@@ -88,6 +88,14 @@ type AuthUser struct {
 	Password string `json:"password"`
 }
 
+// DiagnosisEntry captures a single screening outcome.
+type DiagnosisEntry struct {
+	PhotoPath string `json:"photo_path"`
+	Timestamp string `json:"timestamp"`
+	Verdict   bool   `json:"verdict"`
+	Rationale string `json:"rationale"`
+}
+
 // Node stores a normalized conversation node for runtime use.
 type Node struct {
 	ID                string

@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -41,6 +43,8 @@ func resetGlobals() {
 	startNodeID = ""
 	states = make(map[int64]*ChatState)
 	authUsers = nil
+	diagnosisLog = nil
+	diagnosisFile = ""
 }
 
 func TestLoadConversation(t *testing.T) {
@@ -212,6 +216,43 @@ func TestConversationFlow(t *testing.T) {
 	finalState := chatStateFor(chatID)
 	if finalState.Awaiting != "" {
 		t.Fatalf("expected awaiting cleared, got %q", finalState.Awaiting)
+	}
+}
+
+func TestRecordDiagnosis(t *testing.T) {
+	resetGlobals()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "diag.json")
+	if err := loadDiagnosis(path); err != nil {
+		t.Fatalf("loadDiagnosis returned error: %v", err)
+	}
+	if err := recordDiagnosis("patient1", "/tmp/photo.jpg", true, "looks suspicious"); err != nil {
+		t.Fatalf("recordDiagnosis returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed reading diagnosis file: %v", err)
+	}
+	var log map[string][]DiagnosisEntry
+	if err := json.Unmarshal(data, &log); err != nil {
+		t.Fatalf("failed to decode diagnosis file: %v", err)
+	}
+	entries := log["patient1"]
+	if len(entries) != 1 {
+		t.Fatalf("expected one entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.PhotoPath != "/tmp/photo.jpg" {
+		t.Fatalf("photo path mismatch: %q", entry.PhotoPath)
+	}
+	if !entry.Verdict {
+		t.Fatalf("expected verdict true")
+	}
+	if entry.Rationale != "looks suspicious" {
+		t.Fatalf("rationale mismatch: %q", entry.Rationale)
+	}
+	if entry.Timestamp == "" {
+		t.Fatalf("expected timestamp to be recorded")
 	}
 }
 

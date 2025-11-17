@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.22 AS build
+FROM golang:1.22 AS go-build
 WORKDIR /app
 
 # Pull Go dependencies first for better layer caching
@@ -13,14 +13,36 @@ COPY src/ ./
 # Build the binary statically so it runs in a minimal runtime image
 RUN CGO_ENABLED=0 GOOS=linux go build -o telbot
 
-FROM gcr.io/distroless/base-debian12
+# --- Telbot runtime image -----------------------------------------------------
+FROM gcr.io/distroless/base-debian12 AS telbot
 WORKDIR /app
 
-# Copy the compiled binary and runtime assets
-COPY --from=build /app/telbot ./telbot
+ENV ASSETS_DIR=/app/assets \
+    CONFIG_DIR=/app/configs
+
+COPY --from=go-build /app/telbot ./telbot
 COPY src/configs ./configs
-COPY src/states.json ./states.json
+COPY src/assets ./assets
 COPY src/.env ./.env
 
-# Run the Telegram bot
-ENTRYPOINT ["./telbot"]
+ENTRYPOINT ["/app/telbot"]
+
+# --- FastAPI dashboard image --------------------------------------------------
+FROM python:3.12-slim AS dashboard
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    CONFIG_DIR=/app/configs \
+    ASSETS_DIR=/app/assets \
+    FASTAPI_PORT=8000
+
+COPY pyservice/requirements.txt ./requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt
+
+COPY pyservice ./pyservice
+COPY src/assets ./assets
+COPY src/configs ./configs
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn pyservice.app.main:app --host 0.0.0.0 --port ${FASTAPI_PORT:-8000}"]
