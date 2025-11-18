@@ -1,15 +1,19 @@
+import asyncio
+import contextlib
 import json
+import logging
 import os
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from redis import asyncio as aioredis
 
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_DIR = SERVICE_ROOT.parent / "src" / "configs"
@@ -18,6 +22,8 @@ DEFAULT_ASSETS_DIR = SERVICE_ROOT.parent / "src" / "assets"
 CONFIG_DIR = Path(os.getenv("CONFIG_DIR", DEFAULT_CONFIG_DIR))
 ASSETS_DIR = Path(os.getenv("ASSETS_DIR", DEFAULT_ASSETS_DIR))
 FASTAPI_TITLE = os.getenv("FASTAPI_TITLE", "Diagnosis Dashboard")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CHAT_EVENT_QUEUE = os.getenv("CHAT_EVENT_QUEUE", "diagnosis:chat_events")
 
 app = FastAPI(title=FASTAPI_TITLE, version="0.1.0")
 app.mount(
@@ -26,6 +32,7 @@ app.mount(
 
 TEMPLATES = Jinja2Templates(directory=str(SERVICE_ROOT / "templates"))
 SECURITY = HTTPBasic()
+logger = logging.getLogger("diagnosis_dashboard")
 
 
 class AuthStore:
@@ -91,6 +98,100 @@ class DiagnosisStore:
 
 auth_store = AuthStore(CONFIG_DIR)
 diagnosis_store = DiagnosisStore(CONFIG_DIR)
+
+
+class EventBroadcaster:
+    """Tracks active SSE subscribers and broadcasts queue events."""
+
+    def __init__(self) -> None:
+        self._queues: List[asyncio.Queue] = []
+        self._lock = asyncio.Lock()
+
+    async def register(self) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue()
+        async with self._lock:
+            self._queues.append(queue)
+        return queue
+
+    async def unregister(self, queue: asyncio.Queue) -> None:
+        async with self._lock:
+            if queue in self._queues:
+                self._queues.remove(queue)
+
+    async def broadcast(self, payload: Dict[str, Any]) -> None:
+        async with self._lock:
+            queues = list(self._queues)
+        for queue in queues:
+            await queue.put(payload)
+
+
+broadcaster = EventBroadcaster()
+
+
+async def _connect_redis() -> aioredis.Redis:
+    client = aioredis.from_url(
+        REDIS_URL,
+        encoding="utf-8",
+        decode_responses=True,
+    )
+    await client.ping()
+    return client
+
+
+async def _queue_worker(redis_client: aioredis.Redis) -> None:
+    while True:
+        try:
+            entry = await redis_client.blpop(CHAT_EVENT_QUEUE)
+            if not entry:
+                continue
+            _, chat_id = entry
+            payload = {
+                "chat_id": chat_id,
+                "received_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await broadcaster.broadcast(payload)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:  # pragma: no cover - background diagnostics
+            logger.warning("Queue listener error: %s", exc)
+            await asyncio.sleep(2)
+
+
+async def _startup_queue_listener() -> None:
+    try:
+        redis_client = await _connect_redis()
+    except Exception as exc:  # pragma: no cover - startup diagnostics
+        logger.warning("Redis unavailable: %s", exc)
+        app.state.redis = None
+        app.state.queue_task = None
+        return
+
+    app.state.redis = redis_client
+    app.state.queue_task = asyncio.create_task(_queue_worker(redis_client))
+
+
+async def _shutdown_queue_listener() -> None:
+    queue_task = getattr(app.state, "queue_task", None)
+    if queue_task:
+        queue_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await queue_task
+
+    redis_client = getattr(app.state, "redis", None)
+    if redis_client:
+        await redis_client.close()
+
+
+@app.on_event("startup")
+async def _startup_event() -> None:
+    app.state.redis = None
+    app.state.queue_task = None
+    await _startup_queue_listener()
+
+
+@app.on_event("shutdown")
+async def _shutdown_event() -> None:
+    await _shutdown_queue_listener()
 
 
 def _load_json(path: Path) -> Any:
@@ -227,6 +328,32 @@ async def patient_detail(
             "username": username,
         },
     )
+
+
+@app.get("/events")
+async def event_stream(
+    request: Request, username: str = Depends(verify_credentials)
+) -> StreamingResponse:
+    del username  # credentials already verified
+    queue = await broadcaster.register()
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    if await request.is_disconnected():
+                        break
+                    continue
+                data = json.dumps(payload)
+                yield f"data: {data}\n\n"
+                if await request.is_disconnected():
+                    break
+        finally:
+            await broadcaster.unregister(queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.post("/refresh")

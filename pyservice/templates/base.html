@@ -170,6 +170,33 @@
             cursor: pointer;
         }
 
+        .toast-container {
+            position: fixed;
+            top: 1.5rem;
+            right: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: #0f172a;
+            color: #f8fafc;
+            padding: 0.85rem 1.1rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 15px 30px rgba(15, 23, 42, 0.25);
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        .toast.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
         @media (max-width: 640px) {
             body {
                 padding: 1rem;
@@ -204,6 +231,58 @@
     <main class="card">
         {% block content %}{% endblock %}
     </main>
+    <div id="notification-root" class="toast-container" aria-live="polite"></div>
+    <script>
+        (function () {
+            if (!window.EventSource) {
+                return;
+            }
+            const root = document.getElementById("notification-root");
+            if (!root) {
+                return;
+            }
+
+            function showToast(text) {
+                const toast = document.createElement("div");
+                toast.className = "toast";
+                toast.textContent = text;
+                toast.setAttribute("role", "status");
+                root.appendChild(toast);
+                requestAnimationFrame(() => {
+                    toast.classList.add("visible");
+                });
+                setTimeout(() => {
+                    toast.classList.remove("visible");
+                    setTimeout(() => toast.remove(), 250);
+                }, 5000);
+            }
+
+            const source = new EventSource("/events");
+            let streamWarningShown = false;
+            source.onmessage = (event) => {
+                try {
+                    const payload = JSON.parse(event.data || "{}");
+                    if (payload.chat_id) {
+                        showToast(`New photo analysed for chat ${payload.chat_id}`);
+                    }
+                    streamWarningShown = false;
+                } catch (err) {
+                    console.warn("Notification parse error", err);
+                }
+            };
+
+            source.onerror = () => {
+                if (!streamWarningShown) {
+                    showToast("Notification stream disconnected. Retrying...");
+                    streamWarningShown = true;
+                }
+            };
+
+            window.addEventListener("beforeunload", () => {
+                source.close();
+            });
+        })();
+    </script>
 </body>
 
 </html>

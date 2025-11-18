@@ -489,6 +489,7 @@ func handlePhotoMessage(chatID int64, msg *Message, photoPath string) {
 	defer cancel()
 	st := chatStateFor(chatID)
 	awaitingID := st.Awaiting
+	enqueueChatID(ctx, chatID)
 
 	answer, rationale, err := classifyPhoto(ctx, photoPath)
 	if err != nil {

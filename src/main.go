@@ -95,6 +95,8 @@ func main() {
 		log.Printf("diagnosis history entries: %d", len(diagnosisLog))
 	}
 
+	initQueue()
+
 	offset := 0
 	client := &http.Client{Timeout: 60 * time.Second}
 	httpClient = client

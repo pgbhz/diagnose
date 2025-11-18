@@ -1,6 +1,11 @@
 version: "3.11"
 
 services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+
   telbot:
     build:
       context: .
@@ -11,6 +16,8 @@ services:
     environment:
       - CONFIG_DIR=/app/configs
       - ASSETS_DIR=/app/assets
+      - REDIS_ADDR=redis:6379
+      - CHAT_EVENT_QUEUE=diagnosis:chat_events
     volumes:
       - ./src/configs:/app/configs:ro
       - ./src/assets:/app/assets
@@ -27,7 +34,10 @@ services:
       - CONFIG_DIR=/app/configs
       - ASSETS_DIR=/app/assets
       - FASTAPI_PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - CHAT_EVENT_QUEUE=diagnosis:chat_events
     depends_on:
+      - redis
       - telbot
     ports:
       - "8000:8000"
