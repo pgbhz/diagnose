@@ -8,12 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from redis import asyncio as aioredis
+from pydantic import BaseModel
 
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_DIR = SERVICE_ROOT.parent / "src" / "configs"
@@ -24,6 +26,7 @@ ASSETS_DIR = Path(os.getenv("ASSETS_DIR", DEFAULT_ASSETS_DIR))
 FASTAPI_TITLE = os.getenv("FASTAPI_TITLE", "Diagnosis Dashboard")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CHAT_EVENT_QUEUE = os.getenv("CHAT_EVENT_QUEUE", "diagnosis:chat_events")
+MODEL_SERVICE_URL = os.getenv("MODEL_SERVICE_URL", "http://localhost:8080")
 
 app = FastAPI(title=FASTAPI_TITLE, version="0.1.0")
 app.mount(
@@ -126,6 +129,18 @@ class EventBroadcaster:
 
 
 broadcaster = EventBroadcaster()
+
+
+class ClassifyPayload(BaseModel):
+    photo_path: str
+
+
+class TrainPayload(BaseModel):
+    epochs: int | None = None
+    patience: int | None = None
+    learning_rate: float | None = None
+    batch_size: int | None = None
+    augment: bool | None = None
 
 
 async def _connect_redis() -> aioredis.Redis:
@@ -360,6 +375,93 @@ async def event_stream(
 async def refresh_data(username: str = Depends(verify_credentials)) -> RedirectResponse:
     diagnosis_store.reload()
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/api/classify-image")
+async def classify_image_endpoint(
+    payload: ClassifyPayload, username: str = Depends(verify_credentials)
+) -> Dict[str, Any]:
+    del username
+    if not payload.photo_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="photo_path is required",
+        )
+
+    target = MODEL_SERVICE_URL.rstrip("/") + "/predict"
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(target, json={"image_path": payload.photo_path})
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Model service unavailable: {exc}",
+        ) from exc
+
+    content_type = response.headers.get("content-type", "")
+    if response.status_code >= 400:
+        detail: Any
+        if "application/json" in content_type:
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = response.text
+        else:
+            detail = response.text
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=detail or "Model service error",
+        )
+
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Model service returned invalid JSON",
+        ) from exc
+
+
+@app.post("/api/train-model")
+async def train_model_endpoint(
+    payload: TrainPayload | None = None,
+    username: str = Depends(verify_credentials),
+) -> Dict[str, Any]:
+    del username
+    request_payload = payload.model_dump(exclude_none=True) if payload else {}
+    target = MODEL_SERVICE_URL.rstrip("/") + "/train"
+    try:
+        async with httpx.AsyncClient(timeout=600) as client:
+            response = await client.post(target, json=request_payload or {})
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Model service unavailable: {exc}",
+        ) from exc
+
+    content_type = response.headers.get("content-type", "")
+    body: Any
+    if "application/json" in content_type:
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+    else:
+        body = None
+
+    if response.status_code >= 400:
+        detail = body.get("detail") if isinstance(body, dict) else response.text
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=detail or "Model service error",
+        )
+
+    if body is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Model service returned invalid JSON",
+        )
+    return body
 
 
 @app.get("/logout", response_class=HTMLResponse)

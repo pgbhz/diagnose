@@ -170,6 +170,37 @@
             cursor: pointer;
         }
 
+        .classify-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            border: 1px solid var(--accent);
+            border-radius: 999px;
+            padding: 0.35rem 0.9rem;
+            background: transparent;
+            color: var(--accent);
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .classify-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .classify-result {
+            margin-top: 0.35rem;
+            font-size: 0.85rem;
+            color: #374151;
+        }
+
+        .train-status {
+            font-size: 0.85rem;
+            color: #374151;
+            min-width: 180px;
+            text-align: left;
+        }
+
         .toast-container {
             position: fixed;
             top: 1.5rem;
@@ -225,6 +256,8 @@
             <form action="/refresh" method="post">
                 <button class="btn ghost" type="submit">Reload data</button>
             </form>
+            <button class="btn" type="button" id="train-model-btn">Train model</button>
+            <span id="train-model-status" class="train-status" role="status" aria-live="polite"></span>
             <a class="btn danger" href="/logout">Logout</a>
         </div>
     </header>
@@ -280,6 +313,48 @@
 
             window.addEventListener("beforeunload", () => {
                 source.close();
+            });
+        })();
+
+        (function () {
+            const button = document.getElementById("train-model-btn");
+            if (!button) {
+                return;
+            }
+            const statusEl = document.getElementById("train-model-status");
+            const setStatus = (text) => {
+                if (statusEl) {
+                    statusEl.textContent = text;
+                }
+            };
+            button.addEventListener("click", async () => {
+                button.disabled = true;
+                setStatus("Training in progress…");
+                try {
+                    const response = await fetch("/api/train-model", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: "{}",
+                    });
+                    const payload = await response.json().catch(() => null);
+                    if (!response.ok) {
+                        const detail = payload && payload.detail ? payload.detail : response.statusText;
+                        throw new Error(detail);
+                    }
+                    if (!payload) {
+                        throw new Error("Unexpected response from model service");
+                    }
+                    const transfer = payload.transfer || {};
+                    const acc = typeof transfer.val_accuracy === "number"
+                        ? `${(transfer.val_accuracy * 100).toFixed(2)}%`
+                        : "n/a";
+                    const epochs = transfer.epochs_trained ?? "?";
+                    setStatus(`Transfer acc ${acc} (epochs ${epochs})`);
+                } catch (error) {
+                    setStatus(`Error: ${error.message}`);
+                } finally {
+                    button.disabled = false;
+                }
             });
         })();
     </script>

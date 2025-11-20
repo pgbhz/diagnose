@@ -46,3 +46,29 @@ COPY src/configs ./configs
 EXPOSE 8000
 
 CMD ["sh", "-c", "uvicorn pyservice.app.main:app --host 0.0.0.0 --port ${FASTAPI_PORT:-8000}"]
+
+# --- Model service image --------------------------------------------------
+FROM python:3.11-slim AS modelservice
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    ASSETS_DIR=/app/assets \
+    TRAIN_DATA_DIR=/app/data/train \
+    VALIDATION_DATA_DIR=/app/data/validation \
+    MODEL_DIR=/app/model \
+    WEIGHTS_PATH=/app/model/weights/mobilenet_transfer.keras \
+    FASTAPI_PORT=8080
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY modelservice/requirements.txt ./requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt
+
+COPY modelservice ./modelservice
+COPY src/assets ./assets
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "uvicorn modelservice.app.main:app --host 0.0.0.0 --port ${FASTAPI_PORT:-8080}"]

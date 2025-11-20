@@ -10,6 +10,7 @@
                 <th>Verdict</th>
                 <th>Rationale</th>
                 <th>Photo</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -30,6 +31,16 @@
                     —
                     {% endif %}
                 </td>
+                <td>
+                    {% if entry.photo_path %}
+                    <button type="button" class="classify-btn" data-photo-path="{{ entry.photo_path }}">
+                        Classify Image with MobileNet
+                    </button>
+                    <div class="classify-result" aria-live="polite"></div>
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
             {% else %}
@@ -40,4 +51,42 @@
         </tbody>
     </table>
 </div>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const buttons = document.querySelectorAll(".classify-btn");
+    buttons.forEach((button) => {
+        button.addEventListener("click", async () => {
+            const photoPath = button.dataset.photoPath;
+            const resultElement = button.parentElement.querySelector(".classify-result");
+            if (!photoPath || !resultElement) {
+                return;
+            }
+            button.disabled = true;
+            resultElement.textContent = "Running inference...";
+            try {
+                const response = await fetch("/api/classify-image", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({photo_path: photoPath})
+                });
+                const payload = await response.json().catch(() => null);
+                if (!response.ok) {
+                    const detail = payload && payload.detail ? payload.detail : response.statusText;
+                    throw new Error(detail);
+                }
+                if (!payload) {
+                    throw new Error("Unexpected response from model service");
+                }
+                const label = payload.label === "c" ? "Cancer" : "Non-Cancer";
+                const probability = (payload.probability * 100).toFixed(2);
+                resultElement.textContent = `${label} (${probability}%)`;
+            } catch (error) {
+                resultElement.textContent = `Error: ${error.message}`;
+            } finally {
+                button.disabled = false;
+            }
+        });
+    });
+});
+</script>
 {% endblock %}

@@ -36,12 +36,37 @@ services:
       - FASTAPI_PORT=8000
       - REDIS_URL=redis://redis:6379/0
       - CHAT_EVENT_QUEUE=diagnosis:chat_events
+      - MODEL_SERVICE_URL=http://modelservice:8080
     depends_on:
       - redis
       - telbot
+      - modelservice
     ports:
       - "8000:8000"
     volumes:
       - ./src/configs:/app/configs:ro
       - ./src/assets:/app/assets:ro
+    restart: unless-stopped
+
+  modelservice:
+    build:
+      context: .
+      target: modelservice
+    image: diagnose-modelservice:latest
+    env_file:
+      - src/.env
+    environment:
+      - TRAIN_DATA_DIR=/app/data/train
+      - VALIDATION_DATA_DIR=/app/data/validation
+      - ASSETS_DIR=/app/assets
+      - MODEL_DIR=/app/model
+      - WEIGHTS_PATH=/app/model/weights/mobilenet_transfer.weights.h5
+      - FASTAPI_PORT=8080
+    volumes:
+      - ./data/train:/app/data/train:ro
+      - ./data/validation:/app/data/validation:ro
+      - ./src/assets:/app/assets
+      - ./modelservice/model:/app/model
+    ports:
+      - "8081:8080"
     restart: unless-stopped

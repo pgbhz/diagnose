@@ -37,6 +37,7 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setenv("CONFIG_DIR", str(config_dir))
     monkeypatch.setenv("ASSETS_DIR", str(assets_dir))
+    monkeypatch.setenv("MODEL_SERVICE_URL", "http://modelservice.test")
 
     module = importlib.import_module("pyservice.app.main")
     module = importlib.reload(module)
@@ -103,3 +104,80 @@ def test_logout_forces_basic_auth_prompt(client: TestClient):
 def test_regular_user_cannot_access_dashboard(client: TestClient):
     response = client.get("/", auth=("usr", "pwd"))
     assert response.status_code == 401
+
+
+def test_classify_image_endpoint_calls_model_service(client: TestClient, monkeypatch):
+    captured = {}
+
+    class DummyResponse:
+        def __init__(self) -> None:
+            self.status_code = 200
+            self.headers = {"content-type": "application/json"}
+
+        def json(self):
+            return {"label": "c", "probability": 0.91}
+
+    class DummyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, json):
+            captured["url"] = url
+            captured["json"] = json
+            return DummyResponse()
+
+    monkeypatch.setattr("pyservice.app.main.httpx.AsyncClient", lambda **_: DummyClient())
+
+    response = client.post(
+        "/api/classify-image",
+        auth=("doctor", "doctor"),
+        json={"photo_path": "assets/example.jpg"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["label"] == "c"
+    assert captured["url"].endswith("/predict")
+    assert captured["json"] == {"image_path": "assets/example.jpg"}
+
+
+def test_train_model_endpoint_calls_model_service(client: TestClient, monkeypatch):
+    captured = {}
+
+    class DummyResponse:
+        def __init__(self) -> None:
+            self.status_code = 200
+            self.headers = {"content-type": "application/json"}
+
+        def json(self):
+            return {
+                "baseline": {"val_accuracy": 0.8, "val_loss": 0.5, "epochs_trained": 5},
+                "transfer": {"val_accuracy": 0.9, "val_loss": 0.3, "epochs_trained": 4},
+            }
+
+    class DummyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, json):
+            captured["url"] = url
+            captured["json"] = json
+            return DummyResponse()
+
+    monkeypatch.setattr("pyservice.app.main.httpx.AsyncClient", lambda **_: DummyClient())
+
+    response = client.post(
+        "/api/train-model",
+        auth=("doctor", "doctor"),
+        json={"epochs": 7, "augment": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["transfer"]["val_accuracy"] == 0.9
+    assert captured["url"].endswith("/train")
+    assert captured["json"] == {"epochs": 7, "augment": False}

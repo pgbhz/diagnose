@@ -9,3 +9,5 @@ src/configs/
 tex/
 .venv/
 __pycache__
+modelservice/model/weights/
+!modelservice/model/weights/.gitkeep

@@ -6,6 +6,7 @@ Diagnose automatiza a triagem inicial de casos clínicos via Telegram (bot em Go
 
 - **telbot (Go)** – escuta o Telegram, conduz conversas pré-definidas e persiste os diagnósticos com base nos arquivos de configuração existentes.
 - **Diagnosis Dashboard (FastAPI)** – interface protegida por Basic Auth que lista todos os pacientes encontrados em `diagnosis.json` e permite inspecionar o histórico completo de cada pessoa.
+- **Model Service (FastAPI + TensorFlow)** – expõe endpoints `/train` e `/predict` para treinar um classificador baseado em CNN/MobileNetV2 e classificar imagens armazenadas em `assets/`. O painel consome esse serviço para o botão “Classify Image with MobileNet”.
 - **Redis queue** – transporta, de forma bem simples, os `chat_id` recém processados pelo bot para que o dashboard exiba alertas em tempo real.
 
 As credenciais usadas pelo painel são lidas de `configs/auth.json`, porém apenas entradas dentro de `superusers` (ex.: médicos) podem se autenticar; a tabela `users` continua existindo para o bot, mas não concede acesso ao dashboard.
@@ -49,6 +50,24 @@ export REDIS_ADDR=localhost:6379
 export CHAT_EVENT_QUEUE=diagnosis:chat_events
 ```
 
+### Executar o Model Service
+
+O serviço de modelos reutiliza o mesmo ambiente virtual (ou outro dedicado) e precisa de TensorFlow instalado (veja `modelservice/requirements.txt`). Ele lê as imagens de treino/validação em `data/train` e `data/validation` (subpastas `c/` e `nc/`).
+
+```bash
+pip install -r modelservice/requirements.txt
+
+export TRAIN_DATA_DIR=${TRAIN_DATA_DIR:-$(pwd)/data/train}
+export VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-$(pwd)/data/validation}
+export ASSETS_DIR=${ASSETS_DIR:-$(pwd)/src/assets}
+export MODEL_DIR=${MODEL_DIR:-$(pwd)/modelservice/model}
+
+uvicorn modelservice.app.main:app --reload --port 8080
+```
+
+Para treinar o modelo inicial, envie um POST para `http://localhost:8080/train`. O painel consumirá `http://localhost:8080/predict` automaticamente quando o botão “Classify Image with MobileNet” for acionado.
+Também adicionamos um botão “Train model” no cabeçalho do dashboard que dispara essa mesma chamada usando as credenciais já autenticadas.
+
 ## Testes
 
 - Bot (Go):
@@ -66,16 +85,18 @@ export CHAT_EVENT_QUEUE=diagnosis:chat_events
 
 ## Docker e Compose
 
-O `Dockerfile` expõe dois alvos:
+O `Dockerfile` expõe três alvos:
 
 - `telbot` – imagem minimalista com o binário Go.
 - `dashboard` – imagem Python com o FastAPI/uvicorn.
+- `modelservice` – imagem Python 3.11 com TensorFlow e FastAPI responsável pelo treinamento/inferência.
 
 Você pode construir manualmente cada serviço:
 
 ```bash
 docker build -t diagnose-telbot --target telbot .
 docker build -t diagnose-dashboard --target dashboard .
+docker build -t diagnose-modelservice --target modelservice .
 ```
 
 Para desenvolver localmente com ambos os serviços (mais o Redis embutido), use o `docker-compose.yml`:
