@@ -56,7 +56,7 @@ ENV PYTHONUNBUFFERED=1 \
     TRAIN_DATA_DIR=/app/data/train \
     VALIDATION_DATA_DIR=/app/data/validation \
     MODEL_DIR=/app/model \
-    WEIGHTS_PATH=/app/model/weights/mobilenet_transfer.keras \
+    WEIGHTS_PATH=/app/model/weights/mobilenet_transfer.weights.h5 \
     FASTAPI_PORT=8080
 
 RUN apt-get update \

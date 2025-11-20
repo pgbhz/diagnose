@@ -334,7 +334,7 @@
                     const response = await fetch("/api/train-model", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: "{}",
+                        body: JSON.stringify({}),
                     });
                     const payload = await response.json().catch(() => null);
                     if (!response.ok) {

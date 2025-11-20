@@ -33,7 +33,7 @@
                 </td>
                 <td>
                     {% if entry.photo_path %}
-                    <button type="button" class="classify-btn" data-photo-path="{{ entry.photo_path }}">
+                    <button type="button" class="classify-btn" data-photo-path="{{ entry.photo_path|e }}">
                         Classify Image with MobileNet
                     </button>
                     <div class="classify-result" aria-live="polite"></div>
