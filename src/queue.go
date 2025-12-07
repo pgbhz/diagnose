@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
-	"strconv"
 	"sync"
 
 	"github.com/redis/go-redis/v9"
@@ -36,13 +36,28 @@ func initQueue() {
 	})
 }
 
-// enqueueChatID pushes the chat ID into the configured Redis list queue.
-func enqueueChatID(ctx context.Context, chatID int64) {
+// enqueueChatEvent pushes a JSON event (chat_id and optional path) into the Redis list queue.
+func enqueueChatEvent(ctx context.Context, chatID int64, path string) {
 	if queueClient == nil {
 		return
 	}
-	payload := strconv.FormatInt(chatID, 10)
-	if err := queueClient.RPush(ctx, queueName, payload).Err(); err != nil {
+	event := map[string]any{
+		"chat_id": chatID,
+	}
+	if path != "" {
+		event["path"] = path
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("redis marshal error: %v", err)
+		return
+	}
+	if err := queueClient.RPush(ctx, queueName, string(data)).Err(); err != nil {
 		log.Printf("redis enqueue error: %v", err)
 	}
+}
+
+// enqueueChatID kept for backward compatibility; enqueues only the chat ID.
+func enqueueChatID(ctx context.Context, chatID int64) {
+	enqueueChatEvent(ctx, chatID, "")
 }

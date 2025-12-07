@@ -19,7 +19,7 @@ services:
       - REDIS_ADDR=redis:6379
       - CHAT_EVENT_QUEUE=diagnosis:chat_events
     volumes:
-      - ./src/configs:/app/configs:ro
+      - ./src/configs:/app/configs
       - ./src/assets:/app/assets
     restart: unless-stopped
 

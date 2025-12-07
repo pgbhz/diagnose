@@ -159,9 +159,20 @@ async def _queue_worker(redis_client: aioredis.Redis) -> None:
             entry = await redis_client.blpop(CHAT_EVENT_QUEUE)
             if not entry:
                 continue
-            _, chat_id = entry
+            _, raw = entry
+            chat_id = raw
+            photo_path = None
+            try:
+                obj = json.loads(raw)
+                if isinstance(obj, dict):
+                    if "chat_id" in obj:
+                        chat_id = str(obj.get("chat_id"))
+                    photo_path = obj.get("path") or obj.get("photo_path")
+            except json.JSONDecodeError:
+                pass
             payload = {
                 "chat_id": chat_id,
+                "photo_path": photo_path,
                 "received_at": datetime.now(timezone.utc).isoformat(),
             }
             await broadcaster.broadcast(payload)

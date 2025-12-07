@@ -489,7 +489,8 @@ func handlePhotoMessage(chatID int64, msg *Message, photoPath string) {
 	defer cancel()
 	st := chatStateFor(chatID)
 	awaitingID := st.Awaiting
-	enqueueChatID(ctx, chatID)
+	// Publish event including the photo path so downstream services can act.
+	enqueueChatEvent(ctx, chatID, photoPath)
 
 	answer, rationale, err := classifyPhoto(ctx, photoPath)
 	if err != nil {
